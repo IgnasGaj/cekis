@@ -56,4 +56,4 @@ npm run test:e2e
 
 Playwright refuses to run unless both database URLs name `cekis_test`. It starts the app automatically if port 3100 is free. In CI, PostgreSQL and Mailpit are disposable services. `npm run db:generate` creates a new SQL migration after a schema change; review its SQL before applying it.
 
-Next.js 16 separates development output under `.next/dev` from production output under `.next`. If a build or server gets into a bad state, stop the relevant process, then rerun the command. Never remove output files while that process is running.
+Next.js 16 separates development output under `.next/dev` from production output under `.next`. `npm run typecheck` generates route types first; `next-env.d.ts` is generated and ignored by Git. If a build or server gets into a bad state, stop the relevant process, then rerun the command. Never remove output files while that process is running.
