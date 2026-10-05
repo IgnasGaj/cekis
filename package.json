@@ -11,7 +11,7 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "mail:dev": "maildev --smtp 1025 --web 1080 --ip 127.0.0.1",
+    "mail:dev": "mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:1080",
     "db:grant": "node scripts/grant-app.mjs",
     "setup:local": "node scripts/setup-local.mjs"
   },
@@ -43,7 +43,6 @@
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.8",
-    "maildev": "^2.2.1",
     "postcss": "^8.5.29",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
@@ -52,5 +51,8 @@
   "private": true,
   "engines": {
     "node": ">=22 <23"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
   }
 }

@@ -1,13 +1,32 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { createHmac } from "node:crypto";
 
 type Mail = { ID: string; To: { Address: string }[] };
+const endpoint = "/api/auth/sign-in/magic-link";
+const headers = { Origin: process.env.APP_URL ?? "http://127.0.0.1:3100" };
+const callbacks = { callbackURL: "/pradzia", errorCallbackURL: "/prisijungti/nuoroda-nebegalioja" };
+const rateHeaders = () => ({ ...headers, "X-Forwarded-For": `198.51.${1 + Math.floor(Math.random() * 254)}.${1 + Math.floor(Math.random() * 254)}` });
+
+async function messagesFor(email: string): Promise<Mail[]> {
+  const response = await fetch("http://localhost:1080/api/v1/messages");
+  const { messages } = await response.json() as { messages: Mail[] };
+  return messages.filter((entry) => entry.To.some((to) => to.Address === email));
+}
+
+async function quotaCountFor(email: string): Promise<number> {
+  const key = createHmac("sha256", process.env.BETTER_AUTH_SECRET!).update(email.toLowerCase()).digest("hex");
+  const client = new Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+  await client.connect();
+  try {
+    const result = await client.query<{ count: number }>("SELECT count FROM email_send_limit WHERE key = $1", [key]);
+    return result.rows[0]?.count ?? 0;
+  } finally { await client.end(); }
+}
 
 async function newestLinkFor(email: string) {
   for (let attempt = 0; attempt < 30; attempt++) {
-    const list = await fetch("http://localhost:1080/api/v1/messages");
-    const messages = (await list.json() as { messages: Mail[] }).messages;
-    const message = messages.find((entry) => entry.To.some((to) => to.Address === email));
+    const message = (await messagesFor(email))[0];
     if (message) {
       const detail = await fetch(`http://localhost:1080/api/v1/message/${message.ID}`);
       const text = (await detail.json() as { Text: string }).Text;
@@ -134,26 +153,82 @@ test("viena nuoroda negali sukurti dviejų sesijų lygiagrečiai", async ({ brow
 
 test("atmeta išorinį nukreipimą ir riboja pakartotinį siuntimą", async ({ request }) => {
   const email = `limit-${Date.now()}@example.test`;
-  const endpoint = "/api/auth/sign-in/magic-link";
-  const headers = { Origin: process.env.APP_URL ?? "http://127.0.0.1:3100" };
-  const external = await request.post(endpoint, { headers, data: { email, callbackURL: "//evil.example" } });
+  const scopedHeaders = rateHeaders();
+  const external = await request.post(endpoint, { headers: scopedHeaders, data: { email, callbackURL: "//evil.example" } });
   expect(external.status()).toBe(400);
-  const externalError = await request.post(endpoint, { headers, data: { email, callbackURL: "/pradzia", errorCallbackURL: "https://evil.example" } });
+  const externalError = await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks, errorCallbackURL: "https://evil.example" } });
   expect(externalError.status()).toBe(400);
+  for (const callbackURL of ["https://evil.example", "%2F%2Fevil.example", "not/a/path"]) {
+    expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks, callbackURL } })).status()).toBe(400);
+  }
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks, newUserCallbackURL: "//evil.example" } })).status()).toBe(400);
+  expect(await quotaCountFor(email)).toBe(0);
   for (let index = 0; index < 5; index++) {
-    const result = await request.post(endpoint, { headers, data: { email, callbackURL: "/pradzia" } });
+    const result = await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks } });
     expect(result.ok()).toBe(true);
   }
-  const limited = await request.post(endpoint, { headers, data: { email, callbackURL: "/pradzia" } });
+  const limited = await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks } });
   expect(limited.status()).toBe(429);
 });
 
 test("lygiagrečių siuntimų limitas išlieka tikslus", async ({ request }) => {
   const email = `parallel-limit-${Date.now()}@example.test`;
+  const scopedHeaders = rateHeaders();
   const results = await Promise.all(Array.from({ length: 8 }, () => request.post("/api/auth/sign-in/magic-link", {
-    headers: { Origin: process.env.APP_URL ?? "http://127.0.0.1:3100" },
-    data: { email, callbackURL: "/pradzia" },
+    headers: scopedHeaders,
+    data: { email, ...callbacks },
   })));
   expect(results.filter((result) => result.status() === 200)).toHaveLength(5);
   expect(results.filter((result) => result.status() === 429)).toHaveLength(3);
+  expect(await quotaCountFor(email)).toBe(5);
+});
+
+test("nepatikimos ir neteisingos užklausos nemažina el. pašto limito", async ({ request }) => {
+  const email = `rejected-${Date.now()}@example.test`;
+  const scopedHeaders = rateHeaders();
+  const badHeaders = { ...scopedHeaders, Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" };
+  for (let index = 0; index < 6; index++) {
+    expect((await request.post(endpoint, { headers: badHeaders, data: { email, ...callbacks } })).status()).toBe(403);
+  }
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks, metadata: "invalid" } })).status()).toBe(400);
+  expect(await quotaCountFor(email)).toBe(0);
+  expect(await messagesFor(email)).toHaveLength(0);
+  for (let index = 0; index < 5; index++) {
+    expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks } })).status()).toBe(200);
+  }
+  expect(await quotaCountFor(email)).toBe(5);
+  expect(await messagesFor(email)).toHaveLength(5);
+});
+
+test("trūkstami nukreipimai atmetami, tikra nuoroda veikia", async ({ browser, request }) => {
+  const email = `callback-${Date.now()}@example.test`;
+  const scopedHeaders = rateHeaders();
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, errorCallbackURL: callbacks.errorCallbackURL } })).status()).toBe(400);
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, callbackURL: callbacks.callbackURL } })).status()).toBe(400);
+  expect(await quotaCountFor(email)).toBe(0);
+  expect(await messagesFor(email)).toHaveLength(0);
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks } })).status()).toBe(200);
+  const link = await newestLinkFor(email);
+  const url = new URL(link);
+  expect(url.searchParams.get("callbackURL")).toBe(callbacks.callbackURL);
+  expect(url.searchParams.get("errorCallbackURL")).toBe(callbacks.errorCallbackURL);
+  const page = await browser.newPage();
+  await page.goto(link);
+  await expect(page).toHaveURL(/\/pradzia/);
+  await page.close();
+});
+
+test("bibliotekos užklausų limitas neišnaudoja el. pašto kvotos", async ({ request }) => {
+  const email = `library-limit-${Date.now()}@example.test`;
+  const scopedHeaders = rateHeaders();
+  let limited = false;
+  for (let index = 0; index < 40; index++) {
+    const response = await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks, metadata: "invalid" } });
+    if (response.status() === 429) { limited = true; break; }
+    expect(response.status()).toBe(400);
+  }
+  expect(limited).toBe(true);
+  expect((await request.post(endpoint, { headers: scopedHeaders, data: { email, ...callbacks } })).status()).toBe(429);
+  expect(await quotaCountFor(email)).toBe(0);
+  expect(await messagesFor(email)).toHaveLength(0);
 });

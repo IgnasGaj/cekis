@@ -26,4 +26,6 @@ No purchase, receipt file, OCR, warranty, reminder, PWA, legal, analytics or dep
 - [ ] External email delivery and real-device check (require production configuration/device)
 - [x] Remote CI passed for the Sprint 1 implementation branch
 
-The next implementation boundary is Sprint 2's purchase vault.
+## Audit correction evidence
+
+The 2026-10-05 correction moved email quota consumption behind Better Auth request checks, required supported success/error callbacks, and removed MailDev's vulnerable npm dependency. Node 22 clean install, fresh and repeated migrations, generation, SMTP-backed browser tests, lint, typecheck, unit tests and build passed locally. The complete browser suite has eight cases; it now asserts no quota/email after rejected requests and follows a direct sign-in email's actual URL. The full dependency audit still reports five high development-only entries in the Next ESLint → braces chain; the production-only audit reports zero. Details and the blocked upstream remedy are in [progress](../progress.md). A fresh audit of the corrected commit is required before Sprint 2.

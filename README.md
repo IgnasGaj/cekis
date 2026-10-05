@@ -25,11 +25,13 @@ Open `http://127.0.0.1:3100/prisijungti`. View local email at `http://localhost:
 
 Use an existing PostgreSQL 17 installation. Run `npm run setup:local` first, then create database `cekis` with owner role `cekis_owner` and your own strong password, and change `MIGRATION_DATABASE_URL` in `.env.local`. Set `DATABASE_URL` to a distinct password for `cekis_app`. The migration owner needs permission to create the application role; otherwise a database administrator must run `npm run db:grant`. Run `npm run db:migrate` and `npm run db:grant`. PostgreSQL does not provide per-user row isolation automatically; access control for this sprint is enforced in the server session helper. The application role has only DML grants, not migration privileges.
 
-For a non-Docker SMTP inbox, run `npm run mail:dev` in another terminal. This starts MailDev on SMTP port 1025 with a web inbox at `http://localhost:1080`. The Docker option runs Mailpit at the same ports. Keep `SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025` and the local sender in `.env.local`. The automated browser tests use Mailpit's API; use Docker Mailpit for that test suite. Neither catcher delivers to an external mailbox.
+For a non-Docker SMTP inbox, [install the free Mailpit binary](https://mailpit.axllent.org/docs/install/) (on macOS: `brew install mailpit`), then run `npm run mail:dev` in another terminal. This starts SMTP on port 1025 and its web inbox at `http://localhost:1080`. The Docker option runs the same catcher at those ports. Keep `SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025` and the local sender in `.env.local`. The automated browser tests use Mailpit's API. Neither catcher delivers to an external mailbox.
 
 ## Configuration
 
 `.env.example` lists required values. `APP_URL` must be the exact browser origin, including port. `BETTER_AUTH_SECRET` must have at least 32 characters. `DATABASE_URL` is for the limited application role; `MIGRATION_DATABASE_URL` is for the schema owner. Set `SMTP_USER` and `SMTP_PASSWORD` together only for a real SMTP provider. Production needs HTTPS, a domain, a real email transport and a reviewed deployment/database setup. Auth links expire after five minutes and are single use. Losing access to the mailbox means email-link recovery is unavailable.
+
+Direct magic-link sign-in requests must include `callbackURL: "/pradzia"` and `errorCallbackURL: "/prisijungti/nuoroda-nebegalioja"`. Missing or unsupported destinations return HTTP 400 without sending mail or using the per-email quota. Better Auth checks request trust and its own rate limit before the atomic database quota check at the email-send boundary. An SMTP failure still uses one send attempt; otherwise repeated transport failures could evade the abuse limit. Request a new link after the transport is restored.
 
 ## Commands
 
