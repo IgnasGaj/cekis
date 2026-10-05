@@ -16,12 +16,22 @@ const input = z.object({
 export async function POST(request: NextRequest) {
   if (request.nextUrl.pathname.replace(/\/$/, "") === "/api/auth/sign-in/magic-link") {
     let body: unknown;
-    try { body = await request.clone().json(); } catch { return NextResponse.json({ message: "Neteisingi duomenys." }, { status: 400 }); }
+    let bodyText: string;
+    try {
+      bodyText = await request.text();
+      body = JSON.parse(bodyText);
+    } catch { return NextResponse.json({ message: "Neteisingi duomenys." }, { status: 400 }); }
     const parsed = input.safeParse(body);
     if (!parsed.success ||
       (parsed.data.newUserCallbackURL !== undefined && !safePostLoginPath(parsed.data.newUserCallbackURL))) {
       return NextResponse.json({ message: "Neteisingi duomenys." }, { status: 400 });
     }
+    return handlers.POST(new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body: bodyText,
+      signal: request.signal,
+    }));
   }
   return handlers.POST(request);
 }
