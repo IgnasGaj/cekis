@@ -24,6 +24,6 @@ No purchase, receipt file, OCR, warranty, reminder, PWA, legal, analytics or dep
 - [x] Honest mobile shell with future navigation visibly unavailable
 - [x] Local SMTP browser flow, two-account separation and security checks
 - [ ] External email delivery and real-device check (require production configuration/device)
-- [ ] Remote CI result (check after branch push)
+- [x] Remote CI passed for the Sprint 1 implementation branch
 
 The next implementation boundary is Sprint 2's purchase vault.
