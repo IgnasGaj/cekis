@@ -1,0 +1,16 @@
+{
+  "name": "@next/eslint-plugin-next",
+  "version": "16.3.8-cekis.1",
+  "private": true,
+  "description": "Local single-app adaptation of the Next.js 16.3.8 ESLint plugin",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/vercel/next.js",
+    "directory": "packages/eslint-plugin-next"
+  },
+  "dependencies": {
+    "@eslint-community/eslint-utils": "4.9.1"
+  }
+}

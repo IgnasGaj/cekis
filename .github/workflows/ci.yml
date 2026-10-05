@@ -39,9 +39,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: npm audit
+      - run: npm audit --omit=dev
       - run: npm run db:migrate
       - run: npm run db:grant
       - run: npm run lint
+      - run: npm run test:lint-rules
       - run: npm run typecheck
       - run: npm test
       - run: npx playwright install --with-deps chromium

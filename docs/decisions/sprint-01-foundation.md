@@ -14,7 +14,11 @@ Better Auth stores opaque sessions and single-use, hashed magic-link identifiers
 
 ## Providers and cost boundaries
 
-Local auth email uses Mailpit (Docker) or MailDev (npm) through SMTP. External delivery is not configured. For later production selection, [Resend pricing](https://resend.com/pricing) lists 3,000 free transactional emails/month and 100/day; its [Ireland region](https://resend.com/changelog/multi-region-for-everyone) is available on the free plan. A verified sending domain and potentially a paid tier would be needed as usage grows. No Resend account was created.
+Local auth email uses Mailpit (Docker or a standalone binary) through SMTP. External delivery is not configured. For later production selection, [Resend pricing](https://resend.com/pricing) lists 3,000 free transactional emails/month and 100/day; its [Ireland region](https://resend.com/changelog/multi-region-for-everyone) is available on the free plan. A verified sending domain and potentially a paid tier would be needed as usage grows. No Resend account was created.
+
+## Lint dependency correction
+
+Sprint 01.2 keeps `eslint-config-next@16.3.8` and its TypeScript, React, Hooks, accessibility and Next rules. A local MIT-licensed copy of `@next/eslint-plugin-next@16.3.8` replaces only its glob-based root-directory helper with a single-app root check. The copy retains Vercel's license and rules; its [maintenance instructions](../../vendor/eslint-plugin-next/README.md) must be followed when updating Next or ESLint. The full and production npm audits now report zero findings, and CI runs a full audit plus negative lint fixtures.
 
 PostgreSQL hosting is undecided. [Neon's October 2026 free-plan update](https://neon.com/blog/neon-free-plan-1-gb-per-project) lists 1 GB storage and 100 CU-hours per free project; European regions are available, but data residency and backup requirements need review before selection. Local PostgreSQL remains the only configured database.
 
