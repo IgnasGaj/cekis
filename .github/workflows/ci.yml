@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cekis_test
+          POSTGRES_USER: cekis_owner
+          POSTGRES_PASSWORD: cekis_local
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U cekis_owner -d cekis_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports:
+          - 1025:1025
+          - 1080:8025
+    env:
+      DATABASE_URL: postgres://cekis_app:cekis_local@127.0.0.1:5433/cekis_test
+      MIGRATION_DATABASE_URL: postgres://cekis_owner:cekis_local@127.0.0.1:5433/cekis_test
+      APP_URL: http://127.0.0.1:3100
+      BETTER_AUTH_SECRET: ci-test-secret-replace-before-real-deployment-123456
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: "1025"
+      SMTP_FROM: "Čekis <prisijungimas@cekis.local>"
+      AUTH_SEND_LIMIT: "5"
+      AUTH_SEND_WINDOW_SECONDS: "3600"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm run db:grant
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run build

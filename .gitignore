@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.*.local
+playwright-report/
+test-results/
+coverage/
+*.tsbuildinfo
+.DS_Store
+docs/sprint-01-authentication-app-shell.md
+docs/cekis-project-roadmap(1).md

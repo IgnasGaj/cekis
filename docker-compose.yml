@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cekis
+      POSTGRES_USER: cekis_owner
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?Run npm run setup:local}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - cekis_pg:/var/lib/postgresql/data
+  postgres_test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cekis_test
+      POSTGRES_USER: cekis_owner
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?Run npm run setup:local}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - cekis_pg_test:/var/lib/postgresql/data
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:1080:8025"
+volumes:
+  cekis_pg:
+  cekis_pg_test:
