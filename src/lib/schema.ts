@@ -1,4 +1,4 @@
-import { bigint, boolean, check, date, index, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, foreignKey, index, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const user = pgTable("user", {
@@ -75,6 +75,7 @@ export const purchase = pgTable("purchase", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("purchase_owner_submission_idx").on(table.ownerId, table.submissionKey),
+  uniqueIndex("purchase_owner_id_idx").on(table.ownerId, table.id),
   index("purchase_owner_date_idx").on(table.ownerId, table.purchaseDate.desc(), table.createdAt.desc(), table.id.desc()),
   check("purchase_product_name_check", sql`length(${table.productName}) between 1 and 200 and ${table.productName} = btrim(${table.productName})`),
   check("purchase_seller_check", sql`length(${table.seller}) between 1 and 200 and ${table.seller} = btrim(${table.seller})`),
@@ -82,3 +83,52 @@ export const purchase = pgTable("purchase", {
   check("purchase_price_check", sql`${table.price} is null or (${table.price} >= 0 and ${table.price} <= 9999999999.99)`),
   check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
 ]);
+
+export const receipt = pgTable("receipt", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  submissionKey: uuid("submission_key").notNull(),
+  targetPurchaseId: uuid("target_purchase_id").notNull(),
+  objectKey: text("object_key").notNull(),
+  filename: text("filename").notNull(),
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  sha256: text("sha256").notNull(),
+  state: text("state").notNull().default("reserved"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+  cleanupError: text("cleanup_error"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("receipt_owner_submission_idx").on(table.ownerId, table.submissionKey),
+  uniqueIndex("receipt_owner_id_idx").on(table.ownerId, table.id),
+  uniqueIndex("receipt_object_key_idx").on(table.objectKey),
+  index("receipt_cleanup_idx").on(table.state, table.expiresAt),
+  foreignKey({ name: "receipt_target_purchase_owner_fk", columns: [table.ownerId, table.targetPurchaseId], foreignColumns: [purchase.ownerId, purchase.id] }),
+  check("receipt_state_check", sql`${table.state} in ('reserved','ready','deleting','deleted')`),
+  check("receipt_size_check", sql`${table.byteSize} between 1 and 10485760`),
+  check("receipt_type_check", sql`${table.contentType} in ('image/jpeg','image/png','application/pdf')`),
+  check("receipt_hash_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+  check("receipt_filename_check", sql`length(${table.filename}) between 1 and 200`),
+  check("receipt_attempts_check", sql`${table.cleanupAttempts} >= 0`),
+]);
+
+export const purchaseReceipt = pgTable("purchase_receipt", {
+  ownerId: text("owner_id").notNull(),
+  purchaseId: uuid("purchase_id").notNull(),
+  receiptId: uuid("receipt_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.purchaseId, table.receiptId] }),
+  index("purchase_receipt_owner_receipt_idx").on(table.ownerId, table.receiptId),
+  foreignKey({ name: "purchase_receipt_purchase_owner_fk", columns: [table.ownerId, table.purchaseId], foreignColumns: [purchase.ownerId, purchase.id] }),
+  foreignKey({ name: "purchase_receipt_receipt_owner_fk", columns: [table.ownerId, table.receiptId], foreignColumns: [receipt.ownerId, receipt.id] }),
+]);
+
+export const receiptCancellation = pgTable("receipt_cancellation", {
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  submissionKey: uuid("submission_key").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.ownerId, table.submissionKey] })]);

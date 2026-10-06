@@ -15,27 +15,32 @@
     "mail:dev": "mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:1080",
     "db:grant": "node scripts/grant-app.mjs",
     "db:check-role": "node scripts/check-runtime-role.mjs",
-    "setup:local": "node scripts/setup-local.mjs"
+    "setup:local": "node scripts/setup-local.mjs",
+    "storage:init": "node scripts/storage-init.mjs",
+    "receipts:cleanup": "node scripts/cleanup-receipts.mjs"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/IgnasGaj/cekis.git"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
     "@better-auth/drizzle-adapter": "^1.7.7",
     "better-auth": "^1.7.7",
     "drizzle-orm": "^0.45.3",
     "lucide-react": "^1.52.0",
     "next": "^16.3.8",
     "nodemailer": "^10.0.15",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "sharp": "^0.35.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
     "@next/eslint-plugin-next": "file:vendor/eslint-plugin-next",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",

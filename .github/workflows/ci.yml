@@ -22,6 +22,12 @@ jobs:
         ports:
           - 1025:1025
           - 1080:8025
+      local_s3:
+        image: ghcr.io/shyim/local-s3@sha256:058bbe6528a3219fb321cda01d0f43f96c332470b61128487643973a24a4f20d
+        env:
+          S3_ACCOUNT_ADMIN: testkey:testsecret
+        ports:
+          - 9000:9000
     env:
       DATABASE_URL: postgres://cekis_app:cekis_local@127.0.0.1:5433/cekis_test
       MIGRATION_DATABASE_URL: postgres://cekis_owner:cekis_local@127.0.0.1:5433/cekis_test
@@ -32,6 +38,11 @@ jobs:
       SMTP_FROM: "Čekis <prisijungimas@cekis.local>"
       AUTH_SEND_LIMIT: "5"
       AUTH_SEND_WINDOW_SECONDS: "3600"
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: cekis-ci-test
+      S3_ACCESS_KEY_ID: testkey
+      S3_SECRET_ACCESS_KEY: testsecret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +56,8 @@ jobs:
       - run: npm run db:migrate
       - run: npm run db:grant
       - run: npm run db:check-role
+      - run: npm run storage:init
+      - run: npm run receipts:cleanup -- --dry-run
       - run: npm run lint
       - run: npm run test:lint-rules
       - run: npm run typecheck

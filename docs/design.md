@@ -16,3 +16,7 @@ Only Home and Settings are active. Pirkiniai and Čekis retain their positions b
 ## Sprint 2 adaptation
 
 The same four inspected PNG references guide the purchase list cards, field rows, add action and detail metadata. The device frames, product imagery and receipt previews remain reference material only. Pirkiniai now opens the private list. + Čekis opens a small add screen with one working manual-entry action and a clear notice that file capture and upload follow later. Home links to manual entry and the list without showing fabricated purchases or warranty totals. Detail uses real saved metadata, an empty attachment card and `Garantija nenurodyta`.
+
+## Sprint 3 adaptation
+
+The four available PNG references were inspected again. The add screen uses large camera, image and PDF choices and retains the manual path. Purchase detail lists real receipt filenames, type and size with view/download and attachment actions. The reference's scanned values, receipt photograph, product imagery and warranty examples are not rendered. Selected images are previewed from a short-lived local blob URL; uploaded originals use an authenticated server route. The shell, warm surface, teal controls and bottom navigation order stay consistent.

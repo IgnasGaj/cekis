@@ -15,6 +15,12 @@ const schema = z.object({
   SMTP_PASSWORD: z.string().optional(),
   AUTH_SEND_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
   AUTH_SEND_WINDOW_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+  S3_ENDPOINT: z.url().optional(),
+  S3_REGION: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(3).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  RECEIPT_UPLOADS_PER_HOUR: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export function getEnv() {
@@ -27,4 +33,16 @@ export function getEnv() {
     throw new Error("Čekis konfigūracija neteisinga: SMTP_USER ir SMTP_PASSWORD turi būti pateikti kartu.");
   }
   return result.data;
+}
+
+export function getStorageEnv() {
+  const env = getEnv();
+  if (!env.S3_ENDPOINT || !env.S3_REGION || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
+    throw new Error("Čekio saugykla nesukonfigūruota.");
+  }
+  const url = new URL(env.S3_ENDPOINT);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname))) {
+    throw new Error("Čekio saugyklai reikia HTTPS arba vietinio adreso.");
+  }
+  return { endpoint: env.S3_ENDPOINT, region: env.S3_REGION, bucket: env.S3_BUCKET, accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY };
 }

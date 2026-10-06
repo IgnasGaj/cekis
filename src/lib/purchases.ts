@@ -1,6 +1,6 @@
 import "server-only";
 import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { purchase } from "./schema";
 import { requireSession } from "./session";
 import type { parsePurchaseFields } from "./purchase-validation";
@@ -74,8 +74,18 @@ export async function updatePurchase(id: string, values: Values) {
 export async function deletePurchase(id: string) {
   const { user } = await requireSession();
   if (!isPurchaseId(id)) return false;
-  // Keep only the owner-bound submission key as a replay tombstone; erase user content.
-  const rows = await db.update(purchase).set({ productName: "Ištrinta", seller: "Ištrinta", purchaseDate: "1970-01-01", price: null, currency: null, notes: null, deletedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(purchase.id, id), eq(purchase.ownerId, user.id), isNull(purchase.deletedAt))).returning({ id: purchase.id });
-  return rows.length > 0;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const active = await client.query("SELECT id FROM purchase WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL FOR UPDATE", [id,user.id]);
+    if (!active.rowCount) { await client.query("ROLLBACK"); return false; }
+    // Keep only the owner-bound submission key as a replay tombstone; erase user content.
+    await client.query("UPDATE purchase SET product_name='Ištrinta',seller='Ištrinta',purchase_date='1970-01-01',price=NULL,currency=NULL,notes=NULL,deleted_at=now(),updated_at=now() WHERE id=$1", [id]);
+    const linked = await client.query("SELECT receipt_id FROM purchase_receipt WHERE purchase_id=$1 ORDER BY receipt_id", [id]);
+    for (const row of linked.rows) await client.query("SELECT id FROM receipt WHERE id=$1 FOR UPDATE", [row.receipt_id]);
+    await client.query("DELETE FROM purchase_receipt WHERE purchase_id=$1", [id]);
+    for (const row of linked.rows) await client.query("UPDATE receipt SET expires_at=now()+interval '24 hours',updated_at=now() WHERE id=$1", [row.receipt_id]);
+    await client.query("COMMIT"); return true;
+  } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+  finally { client.release(); }
 }
