@@ -132,3 +132,9 @@ export const receiptCancellation = pgTable("receipt_cancellation", {
   submissionKey: uuid("submission_key").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.ownerId, table.submissionKey] })]);
+
+export const receiptUploadLimit = pgTable("receipt_upload_limit", {
+  ownerId: text("owner_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+}, (table) => [check("receipt_upload_limit_attempts_check", sql`${table.attempts} >= 0`)]);

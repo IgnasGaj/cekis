@@ -1,8 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { randomBytes } from "node:crypto";
 
 type Mail = { ID: string; To: { Address: string }[] };
 async function signIn(page: Page, email: string) {
+  const ip = randomBytes(2);
+  await page.setExtraHTTPHeaders({ "X-Forwarded-For": `198.51.${ip[0]}.${ip[1]}` });
   await page.goto("/prisijungti");
   await page.getByLabel("El. pašto adresas").fill(email);
   await page.getByRole("button", { name: "Siųsti prisijungimo nuorodą" }).click();

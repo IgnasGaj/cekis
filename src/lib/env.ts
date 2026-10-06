@@ -30,6 +30,7 @@ const schema = z.object({
   S3_ACCESS_KEY_ID: z.string().min(1).optional(),
   S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   RECEIPT_UPLOADS_PER_HOUR: z.coerce.number().int().min(1).max(100).default(20),
+  RECEIPT_ATTEMPTS_PER_HOUR: z.coerce.number().int().min(1).max(500).default(60),
 });
 
 export function getEnv() {

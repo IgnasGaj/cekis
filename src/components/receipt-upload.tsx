@@ -1,6 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- The selected local original is previewed without optimization. */
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
 
@@ -24,6 +25,7 @@ export async function sendReceipt(file: File, purchaseId: string, key: string, s
 export async function cancelReceipt(key: string) {
   const result = await fetch("/api/receipts/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) });
   if (!result.ok) throw new Error(await errorMessage(result));
+  return result.json() as Promise<{ completed: boolean }>;
 }
 function useSelectedFile() {
   const [selected, setSelected] = useState<{ file: File | null; url: string | null }>({ file: null, url: null });
@@ -62,7 +64,7 @@ export function ExistingPurchaseUploader({ purchaseId }: { purchaseId: string })
   const router = useRouter(); const { file, setFile, url } = useSelectedFile();
   const [key, setKey] = useState(newSubmissionKey); const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
-  const choose = async (next: File) => { if (file) { try { await cancelReceipt(key); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setKey(newSubmissionKey()); setMessage(""); };
+  const choose = async (next: File) => { let completed = false; if (file) { try { completed = (await cancelReceipt(key)).completed; } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setKey(newSubmissionKey()); setMessage(completed ? "Ankstesnis čekis jau pridėtas ir liko prie pirkinio." : ""); if (completed) router.refresh(); };
   const upload = async () => {
     if (!file) return;
     if (!file.size || file.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; }
@@ -72,7 +74,7 @@ export function ExistingPurchaseUploader({ purchaseId }: { purchaseId: string })
     finally { setBusy(false); controller.current = null; }
   };
   const cancel = async () => { controller.current?.abort(); setBusy(false);
-    try { await cancelReceipt(key); setFile(null); setKey(newSubmissionKey()); setMessage("Įkėlimas atšauktas."); router.refresh(); }
+    try { const result = await cancelReceipt(key); setFile(null); setKey(newSubmissionKey()); setMessage(result.completed ? "Čekis jau pridėtas ir liko prie pirkinio." : "Įkėlimas atšauktas."); router.refresh(); }
     catch { setMessage("Atšaukti nepavyko. Bandyk dar kartą."); }
   };
   return <section className="receipt-upload"><h3>Pridėti čekį</h3><FileChoices onFile={choose} disabled={busy} />
@@ -87,7 +89,8 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
   const [values, setValues] = useState(empty); const [purchaseKey] = useState(newSubmissionKey);
   const [uploadKey, setUploadKey] = useState(newSubmissionKey); const [purchaseId, setPurchaseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
-  const choose = async (next: File) => { if (file) { try { await cancelReceipt(uploadKey); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setUploadKey(newSubmissionKey()); setMessage(""); };
+  const createAttempted = useRef(false);
+  const choose = async (next: File) => { let completed = false; if (file) { try { completed = (await cancelReceipt(uploadKey)).completed; } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setUploadKey(newSubmissionKey()); setMessage(completed ? "Ankstesnis čekis jau pridėtas ir liko prie pirkinio." : createAttempted.current && !purchaseId ? "Pirkinio išsaugojimo būsena neaiški. Prieš kartodamas patikrink pirkinių sąrašą." : ""); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); if (!file) return;
     if (!file.size || file.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; }
@@ -96,9 +99,15 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     try {
       let id = savedPurchaseId;
       if (!id) {
+        createAttempted.current = true;
         const result = await fetch("/api/purchases", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: purchaseKey, fields: values }), signal: abort.signal });
-        if (!result.ok) { const body = await result.json().catch(() => ({})); throw new Error(body.errors ? Object.values(body.errors).join(" ") : body.error ?? "Pirkinio išsaugoti nepavyko."); }
-        id = (await result.json()).id; savedPurchaseId = id; setPurchaseId(id);
+        if (!result.ok) { if (result.status < 500) createAttempted.current = false; const body = await result.json().catch(() => ({})); throw new Error(body.errors ? Object.values(body.errors).join(" ") : body.error ?? "Pirkinio išsaugoti nepavyko."); }
+        const saved = await result.json() as { id: string; fields: PurchaseFields; matchesSubmitted: boolean };
+        id = saved.id; savedPurchaseId = id; setValues(saved.fields); setPurchaseId(id);
+        if (!saved.matchesSubmitted) {
+          setMessage("Pirkinys jau buvo išsaugotas su kitais duomenimis. Patikrink išsaugotą pirkinį ir prireikus jį redaguok. Tada bandyk įkelti čekį dar kartą.");
+          return;
+        }
       }
       setMessage("Pirkinys išsaugotas. Įkeliama…");
       await sendReceipt(file,id!,uploadKey,abort.signal);
@@ -107,15 +116,16 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     finally { controller.current = null; setBusy(false); }
   };
   const cancel = async () => { controller.current?.abort(); setBusy(false);
-    try { await cancelReceipt(uploadKey); setFile(null); setUploadKey(newSubmissionKey()); setMessage(purchaseId ? "Pirkinys išsaugotas be čekio." : "Įkėlimas atšauktas."); }
+    try { const result = await cancelReceipt(uploadKey); setFile(null); setUploadKey(newSubmissionKey()); setMessage(result.completed ? "Čekis jau pridėtas ir liko prie pirkinio." : purchaseId ? "Pirkinys išsaugotas be čekio." : createAttempted.current ? "Čekio įkėlimas atšauktas. Pirkinio išsaugojimo būsena neaiški; patikrink pirkinių sąrašą." : "Įkėlimas atšauktas."); }
     catch { setMessage("Atšaukti nepavyko. Bandyk dar kartą."); }
   };
   return <><FileChoices onFile={choose} disabled={busy} />{file && <><Preview file={file} url={url} />
-    <form className="purchase-form" onSubmit={save} noValidate><p className="small-note">Įvesk pirkinio duomenis. Čekio turinys automatiškai nenuskaitomas.</p>
+    <form className="purchase-form" onSubmit={save} noValidate><p className="small-note">{purchaseId ? "Pirkinys jau išsaugotas. Čia rodomi išsaugoti duomenys; bandant dar kartą įkeliamas tik čekis." : "Įvesk pirkinio duomenis. Čekio turinys automatiškai nenuskaitomas."}</p>
       {(Object.keys(labels) as (keyof PurchaseFields)[]).map((name) => <div className="field" key={name}><label htmlFor={`receipt-${name}`}>{labels[name]}</label>
-        {name === "currency" ? <select id={`receipt-${name}`} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })}><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option></select> : name === "notes" ? <textarea id={`receipt-${name}`} value={values[name]} maxLength={2000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} /> : <input id={`receipt-${name}`} type={name === "purchaseDate" ? "date" : "text"} max={name === "purchaseDate" ? maxDate : undefined} maxLength={name === "productName" || name === "seller" ? 200 : undefined} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })} />}</div>)}
+        {name === "currency" ? <select id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })}><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option></select> : name === "notes" ? <textarea id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} maxLength={2000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} /> : <input id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} type={name === "purchaseDate" ? "date" : "text"} max={name === "purchaseDate" ? maxDate : undefined} maxLength={name === "productName" || name === "seller" ? 200 : undefined} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })} />}</div>)}
       <button className="primary-button" disabled={busy} type="submit">{busy ? "Įkeliama…" : purchaseId ? "Bandyti dar kartą" : "Išsaugoti pirkinį ir čekį"}</button>
       <button className="secondary-button" type="button" onClick={cancel}>Atšaukti</button></form></>}
     {message && <p className={message.includes("nepavyko") ? "form-error" : "notice"} role="status" aria-live="polite">{message}</p>}
+    {purchaseId && <p className="small-note"><Link href={`/pirkiniai/${purchaseId}/redaguoti`}>Redaguoti išsaugotą pirkinį</Link> · <Link href={`/pirkiniai/${purchaseId}`}>Atverti pirkinį</Link></p>}
   </>;
 }

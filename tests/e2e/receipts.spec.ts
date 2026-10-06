@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
 import { Client } from "pg";
@@ -7,6 +7,8 @@ import { S3Client, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/clien
 
 type Mail = { ID: string; To: { Address: string }[] };
 async function signIn(page: Page, email: string) {
+  const ip = randomBytes(2);
+  await page.setExtraHTTPHeaders({ "X-Forwarded-For": `198.51.${ip[0]}.${ip[1]}` });
   await page.goto("/prisijungti");
   await page.getByLabel("El. pašto adresas").fill(email);
   await page.getByRole("button", { name: "Siųsti prisijungimo nuorodą" }).click();
@@ -116,6 +118,224 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   await pageA.goBack();
   await expect(pageA.getByText(shared.filename)).toHaveCount(0);
   await a.close(); await b.close();
+});
+
+test("pavėluotas atšaukimas ir failo keitimas išsaugo bendrą čekį", async ({ browser }) => {
+  test.setTimeout(120000);
+  const context = await browser.newContext(); const page = await context.newPage();
+  await signIn(page, `receipt-late-${randomUUID()}@example.test`);
+  const first = await createPurchase(page, "Pradinis pirkinys");
+  const second = await createPurchase(page, "Bendras pirkinys");
+  const third = await createPurchase(page, "Lygiagretus pirkinys");
+  await page.goto(`/pirkiniai/${first}`);
+  const png = await sharp({ create: { width: 9, height: 9, channels: 3, background: "white" } }).png().toBuffer();
+  let lost = false;
+  await page.route("**/api/receipts", async (route) => {
+    if (lost) return route.continue();
+    lost = true;
+    const saved = await route.fetch(); expect(saved.status()).toBe(200);
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko. Bandyk dar kartą." }) });
+  });
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "bendras.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "Įkelti čekį" }).click();
+  await expect(page.getByText("Atsakymas nutrūko. Bandyk dar kartą.")).toBeVisible();
+  const row = await db(async (client) => (await client.query("SELECT id,owner_id,submission_key,object_key FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [first])).rows[0]);
+  const other = await context.newPage();
+  expect((await other.request.post(`/api/receipts/${row.id}/links`, { headers: { Origin: process.env.APP_URL! }, data: { purchaseId: second } })).status()).toBe(200);
+  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await replacement.setFiles({ name: "kitas.png", mimeType: "image/png", buffer: png });
+  await expect(page.getByText("Ankstesnis čekis jau pridėtas ir liko prie pirkinio.")).toBeVisible();
+  await page.getByRole("button", { name: "Atšaukti" }).click();
+  const cancel = () => page.request.post("/api/receipts/cancel", { headers: { Origin: process.env.APP_URL! }, data: { key: row.submission_key } });
+  expect((await (await cancel()).json()).completed).toBe(true);
+  const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect();
+  await blocker.query("BEGIN");
+  const [{ pid }] = (await blocker.query("SELECT pg_backend_pid() AS pid FROM receipt WHERE id=$1 FOR UPDATE", [row.id])).rows;
+  try {
+    const attach = other.request.post(`/api/receipts/${row.id}/links`, { headers: { Origin: process.env.APP_URL! }, data: { purchaseId: third } });
+    const lateCancel = cancel();
+    await expect.poll(async () => (await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [pid])).rows[0].n, { timeout: 10000 }).toBeGreaterThanOrEqual(1);
+    await blocker.query("COMMIT");
+    expect((await attach).status()).toBe(200);
+    expect((await (await lateCancel).json()).completed).toBe(true);
+  } finally { await blocker.query("ROLLBACK").catch(() => {}); await blocker.end(); }
+  await db(async (client) => {
+    expect((await client.query("SELECT state FROM receipt WHERE id=$1", [row.id])).rows[0].state).toBe("ready");
+    expect((await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE receipt_id=$1", [row.id])).rows[0].n).toBe(3);
+  });
+  const { execFileSync } = await import("node:child_process");
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: process.env });
+  expect(sha(await (await page.request.get(`/api/receipts/${row.id}/content?download=1`)).body())).toBe(sha(png));
+  const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region: process.env.S3_REGION, forcePathStyle: true, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID!, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY! } });
+  expect((await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: row.object_key }))).ContentLength).toBe(png.length);
+  s3.destroy(); await context.close();
+});
+
+test("atšaukimas galutinio įrašymo metu neištrina jau paruošto čekio", async ({ page }) => {
+  test.setTimeout(90000);
+  await signIn(page, `receipt-final-cancel-${randomUUID()}@example.test`);
+  const purchaseId = await createPurchase(page, "Galutinis įrašymas");
+  const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+  const key = randomUUID();
+  const barrierKey = `receipt-final-${key}`;
+  const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect();
+  const ownerDb = new Client({ connectionString: process.env.MIGRATION_DATABASE_URL }); await ownerDb.connect();
+  const [{ pid: blockerPid }] = (await blocker.query("SELECT pg_advisory_lock(hashtextextended($1,91732)),pg_backend_pid() AS pid", [barrierKey])).rows;
+  try {
+    await ownerDb.query("DROP TRIGGER IF EXISTS receipt_pause_ready_test ON receipt");
+    await ownerDb.query(`CREATE OR REPLACE FUNCTION receipt_pause_ready_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.submission_key = '${key}'::uuid AND NEW.state='ready' THEN
+        PERFORM pg_advisory_lock(hashtextextended('${barrierKey}',91732));
+        PERFORM pg_advisory_unlock(hashtextextended('${barrierKey}',91732));
+      END IF; RETURN NEW; END $$`);
+    await ownerDb.query("CREATE TRIGGER receipt_pause_ready_test BEFORE UPDATE ON receipt FOR EACH ROW EXECUTE FUNCTION receipt_pause_ready_test()");
+    const upload = page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "galutinis.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": key }, data: png });
+    let uploadPid = 0;
+    await expect.poll(async () => {
+      const rows = await blocker.query("SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [blockerPid]);
+      uploadPid = rows.rows[0]?.pid ?? 0; return uploadPid;
+    }, { timeout: 10000 }).toBeGreaterThan(0);
+    const cancellation = page.request.post("/api/receipts/cancel", { headers: { Origin: process.env.APP_URL! }, data: { key } });
+    await expect.poll(async () => (await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [uploadPid])).rows[0].n, { timeout: 10000 }).toBeGreaterThanOrEqual(1);
+    await blocker.query("SELECT pg_advisory_unlock(hashtextextended($1,91732))", [barrierKey]);
+    expect((await upload).status()).toBe(200);
+    expect((await (await cancellation).json()).completed).toBe(true);
+    const row = await db(async (client) => (await client.query("SELECT id,state FROM receipt WHERE submission_key=$1", [key])).rows[0]);
+    expect(row.state).toBe("ready");
+    await db(async (client) => expect((await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE receipt_id=$1", [row.id])).rows[0].n).toBe(1));
+    const { execFileSync } = await import("node:child_process");
+    execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: process.env });
+    expect(sha(await (await page.request.get(`/api/receipts/${row.id}/content`)).body())).toBe(sha(png));
+  } finally {
+    await blocker.query("SELECT pg_advisory_unlock(hashtextextended($1,91732))", [barrierKey]).catch(() => {});
+    await blocker.end();
+    await ownerDb.query("DROP TRIGGER IF EXISTS receipt_pause_ready_test ON receipt").catch(() => {});
+    await ownerDb.query("DROP FUNCTION IF EXISTS receipt_pause_ready_test()").catch(() => {});
+    await ownerDb.end();
+  }
+});
+
+test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", async ({ page }) => {
+  test.setTimeout(90000);
+  const email = `receipt-fields-${randomUUID()}@example.test`;
+  await signIn(page, email); await page.goto("/prideti");
+  const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "pradinis.png", mimeType: "image/png", buffer: png });
+  await page.getByLabel("Prekės pavadinimas").fill("Pradinis produktas");
+  await page.getByLabel("Pardavėjas").fill("Pradinis pardavėjas");
+  await page.getByLabel("Pirkimo data").fill("2024-03-01");
+  let lost = false;
+  await page.route("**/api/purchases", async (route) => {
+    if (lost) return route.continue();
+    lost = true;
+    const saved = await route.fetch(); expect(saved.status()).toBe(200);
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko." }) });
+  });
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page.getByText("Atsakymas nutrūko.")).toBeVisible();
+  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
+  const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await again.setFiles({ name: "pakeistas.png", mimeType: "image/png", buffer: png });
+  await page.getByLabel("Kaina (neprivaloma)").fill("netinkama");
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page.getByText("Įvesk tinkamą kainą")).toBeVisible();
+  await page.getByLabel("Prekės pavadinimas").fill("Pakeistas produktas");
+  await page.getByLabel("Kaina (neprivaloma)").fill("29.99");
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page.getByText(/Pirkinys jau buvo išsaugotas su kitais duomenimis/)).toBeVisible();
+  await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue("Pradinis produktas");
+  await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Redaguoti išsaugotą pirkinį" })).toBeVisible();
+  let uploadFailed = false;
+  await page.route("**/api/receipts", async (route) => {
+    if (uploadFailed) return route.continue();
+    uploadFailed = true;
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Saugykla laikinai nepasiekiama." }) });
+  });
+  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
+  await expect(page.getByText(/Saugykla laikinai nepasiekiama/)).toBeVisible();
+  await expect(page.getByLabel("Pardavėjas")).toBeDisabled();
+  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await expect(page.getByText("Pirkinys išsaugotas be čekio.")).toBeVisible();
+  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await replacement.setFiles({ name: "naujas.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
+  await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
+  await db(async (client) => {
+    const records = await client.query("SELECT p.id,p.product_name,p.seller,p.price,(SELECT count(*)::int FROM purchase_receipt pr WHERE pr.purchase_id=p.id) AS links FROM purchase p JOIN \"user\" u ON u.id=p.owner_id WHERE u.email=$1", [email]);
+    expect(records.rows).toHaveLength(1);
+    expect(records.rows[0]).toMatchObject({ product_name: "Pradinis produktas", seller: "Pradinis pardavėjas", price: null, links: 1 });
+  });
+});
+
+test("pridėjimo formos pavėluotas atšaukimas palieka jau pridėtą čekį", async ({ page }) => {
+  test.setTimeout(90000);
+  const email = `receipt-add-late-${randomUUID()}@example.test`;
+  await signIn(page, email); await page.goto("/prideti");
+  const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "veluojantis.png", mimeType: "image/png", buffer: png });
+  await page.getByLabel("Prekės pavadinimas").fill("Pavėluotas atsakymas");
+  await page.getByLabel("Pardavėjas").fill("Parduotuvė");
+  await page.getByLabel("Pirkimo data").fill("2024-03-01");
+  let lost = false;
+  await page.route("**/api/receipts", async (route) => {
+    if (lost) return route.continue();
+    lost = true;
+    const saved = await route.fetch(); expect(saved.status()).toBe(200);
+    await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko." }) });
+  });
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page.getByText(/Atsakymas nutrūko/)).toBeVisible();
+  await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
+  const row = await db(async (client) => (await client.query("SELECT r.id,r.object_key FROM receipt r JOIN \"user\" u ON u.id=r.owner_id WHERE u.email=$1", [email])).rows[0]);
+  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await expect(page.getByText("Čekis jau pridėtas ir liko prie pirkinio.")).toBeVisible();
+  await db(async (client) => {
+    expect((await client.query("SELECT state FROM receipt WHERE id=$1", [row.id])).rows[0].state).toBe("ready");
+    expect((await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE receipt_id=$1", [row.id])).rows[0].n).toBe(1);
+  });
+  const { execFileSync } = await import("node:child_process");
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: process.env });
+  expect(sha(await (await page.request.get(`/api/receipts/${row.id}/content`)).body())).toBe(sha(png));
+});
+
+test("netinkami įkėlimai išnaudoja patvarų bandymų limitą", async ({ page }) => {
+  test.setTimeout(90000);
+  const email = `receipt-limit-${randomUUID()}@example.test`;
+  await signIn(page, email);
+  const purchaseId = await createPurchase(page, "Įkėlimo riba");
+  const ownerId = await db(async (client) => (await client.query("SELECT owner_id FROM purchase WHERE id=$1", [purchaseId])).rows[0].owner_id as string);
+  const limit = Number(process.env.RECEIPT_ATTEMPTS_PER_HOUR ?? 60);
+  await db(async (client) => client.query("INSERT INTO receipt_upload_limit (owner_id,window_started_at,attempts) VALUES ($1,now(),$2)", [ownerId,limit-1]));
+  const invalid = () => page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "blogas.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: Buffer.from("invalid png") });
+  const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect();
+  const [{ pid }] = (await blocker.query("SELECT pg_advisory_lock(hashtextextended($1,90817)),pg_backend_pid() AS pid", [ownerId])).rows;
+  let responses;
+  try {
+    const first = invalid(); const second = invalid();
+    await expect.poll(async () => (await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [pid])).rows[0].n, { timeout: 10000 }).toBeGreaterThanOrEqual(2);
+    await blocker.query("SELECT pg_advisory_unlock(hashtextextended($1,90817))", [ownerId]);
+    responses = await Promise.all([first,second]);
+  } finally { await blocker.query("SELECT pg_advisory_unlock(hashtextextended($1,90817))", [ownerId]).catch(() => {}); await blocker.end(); }
+  expect(responses.map((response) => response.status()).sort()).toEqual([400,429]);
+  expect((await invalid()).status()).toBe(429);
+  await db(async (client) => {
+    expect((await client.query("SELECT attempts FROM receipt_upload_limit WHERE owner_id=$1", [ownerId])).rows[0].attempts).toBe(limit+1);
+    expect((await client.query("SELECT count(*)::int AS n FROM receipt WHERE owner_id=$1", [ownerId])).rows[0].n).toBe(0);
+    await client.query("UPDATE receipt_upload_limit SET window_started_at=now()-interval '61 minutes' WHERE owner_id=$1", [ownerId]);
+  });
+  expect((await invalid()).status()).toBe(400);
+  await db(async (client) => expect((await client.query("SELECT attempts FROM receipt_upload_limit WHERE owner_id=$1", [ownerId])).rows[0].attempts).toBe(1));
+  const png = await sharp({ create: { width: 6, height: 6, channels: 3, background: "white" } }).png().toBuffer();
+  const key = randomUUID();
+  const upload = () => page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "geras.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": key }, data: png });
+  expect((await upload()).status()).toBe(200);
+  expect((await upload()).status()).toBe(200);
+  await db(async (client) => expect((await client.query("SELECT attempts FROM receipt_upload_limit WHERE owner_id=$1", [ownerId])).rows[0].attempts).toBe(3));
 });
 
 test("pakartojimas, atšaukimas, validacija ir valymas", async ({ page }) => {

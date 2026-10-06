@@ -41,6 +41,18 @@ export async function POST(request: Request) {
     await db.query("SELECT pg_advisory_lock(hashtextextended($1,90817))", [session.user.id]);
     advisory = true;
     await db.query("RESET lock_timeout");
+    // Commit admission before reading bytes so rejected files and failed writes
+    // consume the same durable per-owner attempt budget as successful uploads.
+    await db.query("BEGIN");
+    await db.query('SELECT id FROM "user" WHERE id=$1 FOR UPDATE', [session.user.id]);
+    const attemptLimit = getEnv().RECEIPT_ATTEMPTS_PER_HOUR;
+    const admitted = await db.query(`INSERT INTO receipt_upload_limit (owner_id,window_started_at,attempts) VALUES ($1,now(),1)
+      ON CONFLICT (owner_id) DO UPDATE SET
+        window_started_at=CASE WHEN receipt_upload_limit.window_started_at <= now()-interval '1 hour' THEN now() ELSE receipt_upload_limit.window_started_at END,
+        attempts=CASE WHEN receipt_upload_limit.window_started_at <= now()-interval '1 hour' THEN 1 ELSE least(receipt_upload_limit.attempts+1,$2::int+1) END
+      RETURNING attempts`, [session.user.id,attemptLimit]);
+    await db.query("COMMIT");
+    if (admitted.rows[0].attempts > attemptLimit) return json("Pasiekta valandinė įkėlimo bandymų riba. Bandyk vėliau.", 429);
     await db.query("BEGIN");
     await db.query("SET LOCAL lock_timeout = '35s'");
     await db.query('SELECT id FROM "user" WHERE id=$1 FOR UPDATE', [session.user.id]);

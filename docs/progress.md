@@ -37,3 +37,5 @@ Baseline and replacement `eslint --print-config` output had identical rules, opt
 ## Sprint 3 private receipt upload, 2026-10-06
 
 The current branch adds S3-compatible private originals, owner-safe receipt links, cancellation and cleanup state, authenticated view/download, and mobile file choices. OCR and warranty tracking remain next-sprint work. Local and CI verification status is recorded in `sources/sprint-03-completion-report.md`.
+
+The Sprint 3 audit identified three recovery and abuse-control corrections. The current correction work preserves ready shared receipts on late cancellation, freezes and reconciles saved purchase fields during receipt retry, and counts rejected upload attempts in a durable per-owner window. Verification and delivery evidence are recorded in `sources/sprint-03-audit-correction-report.md`.
