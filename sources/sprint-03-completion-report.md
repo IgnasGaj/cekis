@@ -34,3 +34,7 @@ After testing, 46 synthetic Sprint 3 accounts and 56 associated or reserved obje
 - The local setup requires Docker or another compatible private S3 service. No real user data was reset.
 
 The next product slice is Sprint 4 OCR with human review. This report records Sprint 3 only.
+
+## Git delivery and CI
+
+The implementation and initial report were pushed normally to `feature/sprint-03-private-receipt-upload`. `git ls-remote origin refs/heads/feature/sprint-03-private-receipt-upload` matched the local `632098d95c9575d5d2323594860c7383ab56e861` tip. [GitHub Actions run 37454925892](https://github.com/IgnasGaj/cekis/actions/runs/37454925892) for that exact SHA completed successfully, including install, dependency audits, migrations, role/storage setup, lint, typecheck, unit tests, authenticated browser tests and production build. This CI evidence is for the full implementation and the initial report. The final documentation update is checked separately in the delivery response.
