@@ -44,6 +44,8 @@ test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ b
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText("Įvesk prekės pavadinimą")).toBeVisible();
   await expect(page.locator("#productName")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Pardavėjas")).toBeFocused();
   await page.getByLabel("Prekės pavadinimas").fill(" Žalias čėkis ");
   await page.getByLabel("Pardavėjas").fill(" Parduotuvė ");
   await page.getByLabel("Pirkimo data").fill("2024-02-29");
@@ -154,6 +156,8 @@ test("paieška traktuoja šablono ženklus pažodžiui, rikiuoja pagal datą ir 
   const cards = page.locator(".purchase-card strong");
   await expect(cards).toHaveText(["Prekė_1", "Kava", "Kita"]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.evaluate(() => { document.body.style.zoom = "1.5"; return document.documentElement.scrollWidth <= innerWidth; })).toBe(true);
+  await page.evaluate(() => { document.body.style.zoom = ""; });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1024, height: 768 });
