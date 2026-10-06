@@ -20,3 +20,7 @@ The same four inspected PNG references guide the purchase list cards, field rows
 ## Sprint 3 adaptation
 
 The four available PNG references were inspected again. The add screen uses large camera, image and PDF choices and retains the manual path. Purchase detail lists real receipt filenames, type and size with view/download and attachment actions. The reference's scanned values, receipt photograph, product imagery and warranty examples are not rendered. Selected images are previewed from a short-lived local blob URL; uploaded originals use an authenticated server route. The shell, warm surface, teal controls and bottom navigation order stay consistent.
+
+## Sprint 4 review mapping
+
+`85256887-FAEC-4B19-9E8D-3FCA76BAF5C1.PNG` guides the back link, receipt preview, stacked editable fields and primary save action. The implemented page adds scan progress, cancel/retry and manual entry above the form. The reference's warranty row is omitted. Its single “Suma” row is split into a read-only OCR **Čekio suma** suggestion and an explicitly editable **Prekės kaina** field, so a multi-item total cannot become product price without a user's action. All statuses and controls are Lithuanian. The original receipt uses the owner-authorized route.

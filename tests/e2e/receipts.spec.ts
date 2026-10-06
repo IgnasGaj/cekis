@@ -486,3 +486,116 @@ test("objektas išlieka, kai galutinis DB įrašas nepavyksta, ir pakartojimas j
     await ownerDb.end();
   }
 });
+
+test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis", async ({ browser }) => {
+  test.setTimeout(240000);
+  const suffix = randomUUID();
+  const owner = await browser.newContext(); const other = await browser.newContext();
+  const page = await owner.newPage(); const foreign = await other.newPage();
+  await signIn(page, `ocr-owner-${suffix}@example.test`);
+  const purchaseId = await createPurchase(page, "Pradinis pirkinys");
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="950"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="46" fill="black"><text x="65" y="100">TOPO CENTRAS UAB</text><text x="65" y="190">SONY WH1000XM6 449,00 EUR</text><text x="65" y="290">Is viso 449,00 EUR</text><text x="65" y="390">Data: 2026-10-05</text><text x="65" y="490">Cekio Nr. K12345</text></g></svg>`;
+  const png = await sharp(Buffer.from(svg)).png().toBuffer();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "sintetinis-cekis.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "Įkelti čekį" }).click();
+  await expect(page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" })).toBeVisible();
+  const receiptId = await db(async (client) => (await client.query("SELECT id FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [purchaseId])).rows[0].id as string);
+  const original = await page.request.get(`/api/receipts/${receiptId}/content`);
+  expect(sha(await original.body())).toBe(sha(png));
+  await page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
+  await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
+  for (const width of [320, 390, 1024]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => { document.body.style.zoom = "1.25"; });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => { document.body.style.zoom = ""; });
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement !== document.body && getComputedStyle(document.activeElement!).outlineStyle !== "none")).toBe(true);
+  await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
+  await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
+  await expect(page.getByText("Nuskaitymas atšauktas. Čekis išsaugotas.")).toBeVisible();
+  const contentPath = `**/api/receipts/${receiptId}/content`;
+  await page.route(contentPath, (route) => route.fulfill({ status: 503, body: "Neprieinama" }));
+  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
+  await expect(page.getByText("Nepavyko nuskaityti čekio.")).toBeVisible();
+  await page.unroute(contentPath);
+  const start = Date.now();
+  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
+  await expect(page.getByText("Nuskaityta. Peržiūrėk pasiūlymus.")).toBeVisible({ timeout: 30000 });
+  console.log(`Synthetic Lithuanian-style PNG OCR: ${Date.now() - start} ms including retry startup`);
+  await expect(page.getByText("449.00 EUR")).toBeVisible();
+  await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
+  await page.getByLabel("Pardavėjas").fill("");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByText("Įvesk pardavėją")).toBeVisible();
+  await page.getByLabel("Prekės pavadinimas").fill("Sony ausinės, patikrinta");
+  await page.getByLabel("Pardavėjas").fill("Topo Centras");
+  await page.getByLabel("Pirkimo data").fill("2026-10-05");
+  await page.getByLabel("Čekio numeris (neprivaloma)").fill("K12345");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Sony ausinės, patikrinta" })).toBeVisible();
+  await page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
+  await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("K12345");
+  expect(sha(await (await page.request.get(`/api/receipts/${receiptId}/content`)).body())).toBe(sha(png));
+  const payload = { purchaseId, productName: "Sony ausinės, patikrinta", seller: "Topo Centras", purchaseDate: "2026-10-05", price: "", currency: "", notes: "", receiptNumber: "K12345" };
+  const post = () => page.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload });
+  expect((await post()).status()).toBe(200);
+  expect((await Promise.all([post(), post()])).map((response) => response.status())).toEqual([200, 200]);
+  expect((await page.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: { ...payload, purchaseId: { toString: "broken" } } })).status()).toBe(404);
+  await db(async (client) => {
+    expect((await client.query("SELECT count(*)::int AS n FROM purchase WHERE id=$1", [purchaseId])).rows[0].n).toBe(1);
+    expect((await client.query("SELECT receipt_number FROM receipt WHERE id=$1", [receiptId])).rows[0].receipt_number).toBe("K12345");
+  });
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  const pdfDoc = await PDFDocument.create(); pdfDoc.addPage([240, 300]);
+  const pdf = Buffer.from(await pdfDoc.save());
+  const [pdfChooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti PDF Pasirinkti/ }).click()]);
+  await pdfChooser.setFiles({ name: "rankinis.pdf", mimeType: "application/pdf", buffer: pdf });
+  await page.getByRole("button", { name: "Įkelti čekį" }).click();
+  const pdfItem = page.locator(".receipt-item").filter({ hasText: "rankinis.pdf" });
+  await expect(pdfItem.getByRole("link", { name: "Nuskaityti ir peržiūrėti" })).toBeVisible();
+  await pdfItem.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
+  await expect(page.getByText("Šio PDF automatinis nuskaitymas neprieinamas.", { exact: false })).toBeVisible();
+  await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible();
+  const variants = [
+    { name: "keli-produktai", lines: ["PREKYBOS CENTRAS", "Pienas 2,30 EUR", "Duona 1,40 EUR", "Is viso 3,70 EUR", "Data 2026-10-05"] },
+    { name: "neryskus", lines: ["PREKYBOS CENTRAS", "Preke 12,30 EUR", "Is viso 12,30 EUR"], blur: true },
+    { name: "dviprasme-data", lines: ["PREKYBOS CENTRAS", "Data 2026-10-05", "Data 2026-10-06", "Terminal ID 123456", "Preke 12,30 EUR"] },
+    { name: "nepalaikoma-valiuta", lines: ["PREKYBOS CENTRAS", "Preke 12,30 CZK", "Total 12,30 CZK", "Data 2026-10-05"] },
+  ];
+  for (const variant of variants) {
+    const body = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="900"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="46" fill="black">${variant.lines.map((line, index) => `<text x="65" y="${100 + index * 85}">${line}</text>`).join("")}</g></svg>`;
+    const image = sharp(Buffer.from(body));
+    const bytes = await (variant.blur ? image.blur(2.2) : image).png().toBuffer();
+    const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": `${variant.name}.png`, "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: bytes });
+    expect(uploaded.status()).toBe(200);
+    const variantId = (await uploaded.json()).id as string;
+    await page.goto(`/pirkiniai/${purchaseId}/cekis/${variantId}`);
+    const started = Date.now();
+    await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
+    await expect(page.getByText(/Nuskaityta\. Peržiūrėk pasiūlymus\.|Teksto atpažinti nepavyko\.|Nepavyko nuskaityti čekio\./)).toBeVisible({ timeout: 30000 });
+    console.log(`${variant.name} OCR: ${Date.now() - started} ms`);
+    await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
+    await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue("Rankiniu būdu patvirtinta prekė");
+    if (variant.name === "nepalaikoma-valiuta") await expect(page.getByText("Čekio suma").locator("..")).not.toContainText("EUR");
+    expect(sha(await (await page.request.get(`/api/receipts/${variantId}/content`)).body())).toBe(sha(bytes));
+  }
+  await signIn(foreign, `ocr-other-${suffix}@example.test`);
+  await foreign.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await expect(foreign.getByRole("heading", { name: "Pirkinys nerastas" })).toBeVisible();
+  expect((await foreign.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(404);
+  expect((await foreign.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload })).status()).toBe(404);
+  const anonymous = await browser.newContext();
+  expect((await anonymous.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(401);
+  expect((await anonymous.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload })).status()).toBe(401);
+  await anonymous.close(); await owner.close(); await other.close();
+});

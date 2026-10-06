@@ -91,6 +91,7 @@ export const receipt = pgTable("receipt", {
   targetPurchaseId: uuid("target_purchase_id").notNull(),
   objectKey: text("object_key").notNull(),
   filename: text("filename").notNull(),
+  receiptNumber: text("receipt_number"),
   contentType: text("content_type").notNull(),
   byteSize: integer("byte_size").notNull(),
   sha256: text("sha256").notNull(),
@@ -112,6 +113,7 @@ export const receipt = pgTable("receipt", {
   check("receipt_type_check", sql`${table.contentType} in ('image/jpeg','image/png','application/pdf')`),
   check("receipt_hash_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
   check("receipt_filename_check", sql`length(${table.filename}) between 1 and 200`),
+  check("receipt_number_check", sql`${table.receiptNumber} is null or (length(${table.receiptNumber}) between 1 and 100 and ${table.receiptNumber} = btrim(${table.receiptNumber}))`),
   check("receipt_attempts_check", sql`${table.cleanupAttempts} >= 0`),
 ]);
 

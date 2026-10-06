@@ -39,3 +39,7 @@ Baseline and replacement `eslint --print-config` output had identical rules, opt
 The current branch adds S3-compatible private originals, owner-safe receipt links, cancellation and cleanup state, authenticated view/download, and mobile file choices. OCR and warranty tracking remain next-sprint work. Local and CI verification status is recorded in `sources/sprint-03-completion-report.md`.
 
 The Sprint 3 audit identified three recovery and abuse-control corrections. The current correction work preserves ready shared receipts on late cancellation, freezes and reconciles saved purchase fields during receipt retry, and counts rejected upload attempts in a durable per-owner window. Verification and delivery evidence are recorded in `sources/sprint-03-audit-correction-report.md`.
+
+## Sprint 4 OCR and receipt review, 2026-10-06
+
+The `feature/sprint-04-ocr-review` branch adds on-demand local Lithuanian/English image OCR, conservative suggestions, an owner-scoped review page, explicit PDF manual entry, and confirmed receipt-number storage via migration 0007. OCR does not persist text or modify originals. The verification and delivery record is in `sources/sprint-04-completion-report.md`. Warranty tracking remains Sprint 5.

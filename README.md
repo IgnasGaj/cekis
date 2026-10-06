@@ -90,3 +90,9 @@ Run `npm run receipts:cleanup -- --dry-run` to inspect candidates and `npm run r
 ## Lint tooling
 
 `eslint-config-next@16.3.8` uses a [local Next ESLint plugin adaptation](vendor/eslint-plugin-next/README.md). It preserves the official rules while limiting root-directory discovery to this single app, removing the vulnerable glob dependency. Run `npm run test:lint-rules` when changing lint configuration. CI runs the fixture checks and full `npm audit`; do not add monorepo glob roots without reviewing the local helper and its tests.
+
+## OCR review (Sprint 4)
+
+From an owned purchase's receipt list, open **Nuskaityti ir peržiūrėti**. JPEG/PNG OCR runs on request in the browser with Lithuanian and English language data. The preview and OCR input come from the authenticated receipt route. Suggestions can be applied, edited or ignored. The receipt total stays separate from the optional product price. PDF receipts remain available for preview/download and manual review, without automatic PDF scanning.
+
+`npm ci` installs pinned Tesseract.js 7.0.0 and the Lithuanian/English trained-data packages. `npm run ocr:prepare` copies their worker, core and compressed language files to ignored, same-origin `public/ocr/`; `npm run dev`, `npm run build` and Playwright prepare them automatically. Include this preparation step in any other runtime packaging. The first scan can take longer while worker and language data load; runtime depends on the image and device. No OCR API key or new environment variable is needed. Original receipt storage, limits, ownership checks and cleanup remain as in Sprint 3.

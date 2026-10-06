@@ -1,0 +1,2 @@
+ALTER TABLE "receipt" ADD COLUMN "receipt_number" text;--> statement-breakpoint
+ALTER TABLE "receipt" ADD CONSTRAINT "receipt_number_check" CHECK ("receipt"."receipt_number" is null or (length("receipt"."receipt_number") between 1 and 100 and "receipt"."receipt_number" = btrim("receipt"."receipt_number")));

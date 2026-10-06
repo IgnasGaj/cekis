@@ -31,7 +31,7 @@ export function ReceiptManager({ purchaseId, attached, available }: { purchaseId
   return <section className="placeholder-card receipt-section"><h2>Pirkimo čekiai</h2>
     {!attached.length && <p>Čekis nepridėtas</p>}
     {attached.map((item) => <article className="receipt-item" key={item.id}><strong>{item.filename}</strong><span>{item.contentType === "application/pdf" ? "PDF" : item.contentType === "image/png" ? "PNG" : "JPEG"} · {(item.byteSize / 1048576).toFixed(2)} MiB</span>
-      <div className="receipt-links"><a href={`/api/receipts/${item.id}/content`} target="_blank" rel="noreferrer">Peržiūrėti čekį</a><a href={`/api/receipts/${item.id}/content?download=1`}>Atsisiųsti originalą</a></div>
+      <div className="receipt-links"><a href={`/pirkiniai/${purchaseId}/cekis/${item.id}`}>Nuskaityti ir peržiūrėti</a><a href={`/api/receipts/${item.id}/content`} target="_blank" rel="noreferrer">Peržiūrėti čekį</a><a href={`/api/receipts/${item.id}/content?download=1`}>Atsisiųsti originalą</a></div>
       <button disabled={busy} type="button" onClick={() => run(`/api/receipts/${item.id}/links`, "DELETE", purchaseId)}>Pašalinti iš šio pirkinio</button>
       <button disabled={busy} type="button" onClick={() => setConfirm(item)}>Ištrinti čekį visur</button></article>)}
     {confirm && <div className="delete-confirm" role="group" aria-label="Patvirtinti čekio ištrynimą"><strong>Ištrinti „{confirm.filename}“?</strong><p>Čekis bus pašalintas iš {confirm.links} pirkinių ir taps nepasiekiamas.</p><button className="danger-button" disabled={busy} type="button" onClick={() => run(`/api/receipts/${confirm.id}`, "DELETE")}>Ištrinti čekį visur</button><button className="secondary-button" type="button" onClick={() => setConfirm(null)}>Atšaukti</button></div>}

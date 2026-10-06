@@ -50,6 +50,13 @@
       "when": 1791290737072,
       "tag": "0006_amusing_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791301840912,
+      "tag": "0007_watery_iron_man",
+      "breakpoints": true
     }
   ]
 }
