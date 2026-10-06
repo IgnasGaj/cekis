@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { getEnv } from "@/lib/env";
 import { createPurchase, getPurchase, isPurchaseId } from "@/lib/purchases";
 import { parsePurchaseFields } from "@/lib/purchase-validation";
+import { parseWarranty, type WarrantyDraft } from "@/lib/warranty";
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== getEnv().APP_URL) return Response.json({ error: "Neleistina užklausa." }, { status: 403 });
   const session = await auth.api.getSession({ headers: request.headers });
@@ -13,8 +14,14 @@ export async function POST(request: Request) {
   }
   const parsed = parsePurchaseFields(body.fields);
   if (!parsed.value) return Response.json({ errors: parsed.errors }, { status: 400 });
+  const warrantyKeys = ["warrantyState", "warrantyEndDate", "warrantyDurationMonths", "warrantySource"] as const;
+  const warrantySupplied = body.warranty !== undefined;
+  if (warrantySupplied && (!body.warranty || typeof body.warranty !== "object" || warrantyKeys.some((key) => typeof body.warranty[key] !== "string") || typeof body.warranty.warrantyConfirmed !== "boolean"))
+    return Response.json({ errors: { warranty: "Patikrink garantijos informaciją." } }, { status: 400 });
+  const warranty = warrantySupplied ? parseWarranty(body.warranty as WarrantyDraft, parsed.value.purchaseDate) : null;
+  if (warranty && !warranty.value) return Response.json({ errors: { warranty: warranty.error } }, { status: 400 });
   try {
-    const id = await createPurchase(body.key, parsed.value);
+    const id = await createPurchase(body.key, parsed.value, warranty?.value ?? undefined);
     if (!id) return Response.json({ error: "Šis įrašas jau ištrintas." }, { status: 409 });
     const saved = await getPurchase(id);
     if (!saved) return Response.json({ error: "Pirkinys nerastas." }, { status: 404 });
@@ -22,7 +29,8 @@ export async function POST(request: Request) {
       price: saved.price ?? "", currency: saved.currency ?? "EUR", notes: saved.notes ?? "" };
     const matchesSubmitted = saved.productName === parsed.value.productName && saved.seller === parsed.value.seller &&
       saved.purchaseDate === parsed.value.purchaseDate && saved.price === parsed.value.price &&
-      saved.currency === parsed.value.currency && saved.notes === parsed.value.notes;
+      saved.currency === parsed.value.currency && saved.notes === parsed.value.notes && (!warranty?.value ||
+        (saved.warrantyState === warranty.value.warrantyState && saved.warrantyEndDate === warranty.value.warrantyEndDate && saved.warrantyDurationMonths === warranty.value.warrantyDurationMonths && saved.warrantySource === warranty.value.warrantySource));
     return Response.json({ id, fields, matchesSubmitted }, { headers: { "Cache-Control": "private, no-store" } });
   } catch { return Response.json({ error: "Pirkinio išsaugoti nepavyko. Bandyk dar kartą." }, { status: 503 }); }
 }

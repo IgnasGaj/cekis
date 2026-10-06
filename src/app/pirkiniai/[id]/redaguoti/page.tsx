@@ -12,12 +12,13 @@ export default async function EditPurchasePage({ params, searchParams }: { param
   if (!row) notFound();
   const search = await searchParams;
   const single = (key: string) => typeof search[key] === "string" ? search[key] as string : undefined;
-  const context = listParams({ q: single("q"), sort: single("sort"), page: single("page") });
+  const context = listParams({ q: single("q"), sort: single("sort"), warranty: single("warranty"), page: single("page") });
   const query = new URLSearchParams();
   if (context.q) query.set("q", context.q);
   if (context.sort !== "newest") query.set("sort", context.sort);
+  if (context.warranty !== "all") query.set("warranty", context.warranty);
   if (context.page > 1) query.set("page", String(context.page));
   return <PurchaseShell><section className="page-heading"><h1>Redaguoti pirkinį</h1><p>Atnaujink išsaugotą informaciją.</p></section>
-    <PurchaseForm initial={{ productName: row.productName, seller: row.seller, purchaseDate: row.purchaseDate, price: row.price ?? "", currency: row.currency ?? "EUR", notes: row.notes ?? "" }} action={editAction.bind(null, id, query.toString())} cancelHref={`/pirkiniai/${id}${query.size ? `?${query}` : ""}`} edit maxDate={todayInVilnius()} />
+    <PurchaseForm initial={{ productName: row.productName, seller: row.seller, purchaseDate: row.purchaseDate, price: row.price ?? "", currency: row.currency ?? "EUR", notes: row.notes ?? "" }} action={editAction.bind(null, id, query.toString())} cancelHref={`/pirkiniai/${id}${query.size ? `?${query}` : ""}`} edit maxDate={todayInVilnius()} revision={row.revision} warranty={{ warrantyState: row.warrantyState as "unknown" | "none" | "known", warrantyEndDate: row.warrantyEndDate, warrantyDurationMonths: row.warrantyDurationMonths, warrantySource: row.warrantySource as "date" | "duration" | null }} />
   </PurchaseShell>;
 }

@@ -6,6 +6,8 @@ import { getPurchase, listHref, listParams } from "@/lib/purchases";
 import { pool } from "@/lib/db";
 import { ReceiptManager } from "@/components/receipt-manager";
 import { DeleteButton } from "../delete-button";
+import { todayInVilnius } from "@/lib/purchase-validation";
+import { dayPhrase, warrantyStatus } from "@/lib/warranty";
 
 export const dynamic = "force-dynamic";
 export default async function PurchaseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -23,11 +25,13 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
     ORDER BY r.created_at DESC LIMIT 50`, [row.ownerId,id]);
   const search = await searchParams;
   const single = (key: string) => typeof search[key] === "string" ? search[key] as string : undefined;
-  const context = listParams({ q: single("q"), sort: single("sort"), page: single("page") });
+  const context = listParams({ q: single("q"), sort: single("sort"), warranty: single("warranty"), page: single("page") });
   const contextQuery = new URLSearchParams();
   if (context.q) contextQuery.set("q", context.q);
   if (context.sort !== "newest") contextQuery.set("sort", context.sort);
+  if (context.warranty !== "all") contextQuery.set("warranty", context.warranty);
   if (context.page > 1) contextQuery.set("page", String(context.page));
+  const status = warrantyStatus({ warrantyState: row.warrantyState as "unknown" | "none" | "known", warrantyEndDate: row.warrantyEndDate }, todayInVilnius());
   return <PurchaseShell>
     <Link href={listHref(context)} className="back-link">← Mano pirkiniai</Link>
     <section className="page-heading detail-heading"><h1>{row.productName}</h1><p>{row.seller}</p></section>
@@ -40,7 +44,11 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
       {row.price && row.currency && <div className="detail-row"><span>Kaina</span><strong>{displayPrice(row.price, row.currency)}</strong></div>}
       {row.notes && <div className="detail-row"><span>Pastabos</span><p className="notes-text">{row.notes}</p></div>}
     </section>
-    <section className="placeholder-card"><h2>Garantija nenurodyta</h2><p>Garantijos informaciją galėsi pridėti vėlesniame etape.</p></section>
+    <section className="placeholder-card" aria-label="Garantijos informacija"><h2>Garantija</h2><p><strong>{status.label}</strong></p>
+      {row.warrantyEndDate && <p>Pabaigos data: {displayDate(row.warrantyEndDate)}</p>}
+      {status.days !== null && status.days >= 0 && <p>{dayPhrase(status.days)}</p>}
+      <Link className="text-link" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Keisti garantijos informaciją</Link>
+    </section>
     <ReceiptManager purchaseId={id} attached={attachedResult.rows} available={availableResult.rows} />
     <Link className="primary-button" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Redaguoti</Link>
     <DeleteButton id={id} productName={row.productName} context={contextQuery.toString()} />

@@ -1,5 +1,9 @@
 # Progress
 
+## Sprint 5 warranty tracking, 2026-10-06
+
+The `feature/sprint-05-warranty-tracking` branch adds per-purchase unknown/none/known states, explicitly confirmed end dates and whole-month suggestions, Vilnius calendar status, owner-scoped list filters and expiry ordering. Migration 0008 backfills existing purchases as unknown and adds a revision guard for purchase and OCR review edits. The saved warranty remains separate from shared receipts, and OCR never fills it. Verification and delivery details are in `sources/sprint-05-completion-report.md`.
+
 ## Sprint 2 audit corrections, 2026-10-06
 
 The supplied post-sprint audit found a nullable CHECK expression that let PostgreSQL accept a price without currency, and a false empty state after deleting the sole item on a later list page. Forward migration 0003 adds explicit `currency IS NOT NULL` and a preflight check for affected rows; migration 0002 remains unchanged. The list now normalizes stale/out-of-range pages with an owner- and search-scoped count, preserving sort and deletion feedback. Focused PostgreSQL constraint and browser pagination cases were added. The detailed correction evidence is in `sources/sprint-02-audit-correction-report.md`.

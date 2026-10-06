@@ -21,6 +21,6 @@ export default async function ReceiptReviewPage({ params }: { params: Promise<{ 
     <section className="page-heading detail-heading"><h1>Peržiūrėk duomenis</h1><p>Nuskaitytas tekstas yra tik pasiūlymas. Patikrink ir pataisyk prieš išsaugodamas.</p></section>
     <ReceiptReview purchaseId={id} receiptId={receiptId} filename={receipt.filename} contentType={receipt.contentType} receiptNumber={receipt.receiptNumber ?? ""}
       initial={{ productName: purchase.productName, seller: purchase.seller, purchaseDate: purchase.purchaseDate, price: purchase.price ?? "", currency: purchase.currency ?? "", notes: purchase.notes ?? "" }}
-      maxDate={todayInVilnius()} />
+      maxDate={todayInVilnius()} revision={purchase.revision} initialWarranty={{ warrantyState: purchase.warrantyState as "unknown" | "none" | "known", warrantyEndDate: purchase.warrantyEndDate, warrantyDurationMonths: purchase.warrantyDurationMonths, warrantySource: purchase.warrantySource as "date" | "duration" | null }} />
   </PurchaseShell>;
 }

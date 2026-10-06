@@ -1,0 +1,9 @@
+ALTER TABLE "purchase" ADD COLUMN "warranty_state" text DEFAULT 'unknown' NOT NULL;--> statement-breakpoint
+ALTER TABLE "purchase" ADD COLUMN "warranty_end_date" date;--> statement-breakpoint
+ALTER TABLE "purchase" ADD COLUMN "warranty_duration_months" integer;--> statement-breakpoint
+ALTER TABLE "purchase" ADD COLUMN "warranty_source" text;--> statement-breakpoint
+ALTER TABLE "purchase" ADD COLUMN "revision" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+CREATE INDEX "purchase_owner_warranty_idx" ON "purchase" USING btree ("owner_id","warranty_state","warranty_end_date","created_at","id");--> statement-breakpoint
+ALTER TABLE "purchase" ADD CONSTRAINT "purchase_date_finite_check" CHECK ("purchase"."purchase_date" between date '0001-01-01' and date '9999-12-31');--> statement-breakpoint
+ALTER TABLE "purchase" ADD CONSTRAINT "purchase_revision_check" CHECK ("purchase"."revision" >= 1);--> statement-breakpoint
+ALTER TABLE "purchase" ADD CONSTRAINT "purchase_warranty_check" CHECK (("purchase"."warranty_state" in ('unknown','none') and "purchase"."warranty_end_date" is null and "purchase"."warranty_duration_months" is null and "purchase"."warranty_source" is null) or ("purchase"."warranty_state" = 'known' and "purchase"."warranty_end_date" is not null and "purchase"."warranty_end_date" between date '0001-01-01' and date '9999-12-31' and "purchase"."warranty_end_date" >= "purchase"."purchase_date" and "purchase"."warranty_source" is not null and "purchase"."warranty_source" in ('date','duration') and (("purchase"."warranty_source" = 'date' and "purchase"."warranty_duration_months" is null) or ("purchase"."warranty_source" = 'duration' and "purchase"."warranty_duration_months" is not null and "purchase"."warranty_duration_months" between 1 and 600))));

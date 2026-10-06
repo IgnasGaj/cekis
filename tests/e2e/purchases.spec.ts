@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Locator } from "@playwright/test";
 import { Client } from "pg";
 import { randomBytes } from "node:crypto";
 
@@ -30,6 +30,16 @@ async function withAppDb<T>(task: (client: Client) => Promise<T>) {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try { return await task(client); } finally { await client.end(); }
+}
+async function tabTo(page: Page, control: Locator) {
+  for (let step = 0; step < 60; step++) {
+    if (await control.evaluate((element) => element === document.activeElement)) {
+      expect(await control.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+      return;
+    }
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Klaviatūra nepasiekė valdiklio");
 }
 
 test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ browser }) => {
@@ -154,7 +164,7 @@ test("paieška traktuoja šablono ženklus pažodžiui, rikiuoja pagal datą ir 
   await page.getByRole("button", { name: "Rodyti" }).click();
   await expect(page.getByText("Kava")).toBeVisible();
   await page.getByLabel("Ieškoti pagal prekę arba pardavėją").fill("");
-  await page.getByLabel("Rikiuoti pagal pirkimo datą").selectOption("oldest");
+  await page.getByLabel("Rikiuoti pirkinius").selectOption("oldest");
   await page.getByRole("button", { name: "Rodyti" }).click();
   const cards = page.locator(".purchase-card strong");
   await expect(cards).toHaveText(["Prekė_1", "Kava", "Kita"]);
@@ -315,6 +325,135 @@ test("duomenų bazė reikalauja valiutos prie kainos su ribota role", async ({ p
     expect((await insert("12.50", "EUR")).rows[0]).toMatchObject({ price: "12.50", currency: "EUR" });
     expect((await insert(null, null)).rows[0]).toMatchObject({ price: null, currency: null });
   });
+});
+
+test("garantijos būsena, patvirtinimas, konfliktas ir filtravimas prieš puslapiavimą", async ({ browser }) => {
+  const suffix = Date.now();
+  const owner = await browser.newContext({ viewport: { width: 320, height: 720 } });
+  const other = await browser.newContext();
+  const page = await owner.newPage(); const foreign = await other.newPage();
+  const email = `warranty-${suffix}@example.test`;
+  await signIn(page, email);
+  await page.goto("/pirkiniai/naujas");
+  await page.getByLabel("Prekės pavadinimas").fill("Ilga garantijos prekė");
+  await page.getByLabel("Pardavėjas").fill("Pardavėjas");
+  await page.getByLabel("Pirkimo data").fill("2024-01-31");
+  await page.getByLabel("Garantijos būsena").selectOption("known");
+  await page.getByLabel("Kaip nurodysi pabaigą?").selectOption("duration");
+  await page.getByLabel("Trukmė mėnesiais (1–600)").fill("48");
+  await expect(page.getByText("Siūloma pabaigos data:")).toContainText("2028");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByText("Patvirtink pasirinktą garantijos pabaigos datą.")).toBeVisible();
+  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByLabel("Trukmė mėnesiais (1–600)").fill("49");
+  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).not.toBeChecked();
+  await page.getByLabel("Trukmė mėnesiais (1–600)").fill("48");
+  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+/);
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  await expect(page.getByText("Pabaigos data:")).toContainText("2028");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const row = await withAppDb(async (client) => (await client.query("SELECT warranty_state,warranty_end_date::text,warranty_duration_months,warranty_source,revision FROM purchase WHERE id=$1", [id])).rows[0]);
+  expect(row).toMatchObject({ warranty_state: "known", warranty_end_date: "2028-01-31", warranty_duration_months: 48, warranty_source: "duration", revision: 1 });
+  await page.goto(`/pirkiniai/${id}/redaguoti`);
+  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  const stale = await owner.newPage(); await stale.goto(`/pirkiniai/${id}/redaguoti`);
+  await page.getByLabel("Garantijos būsena").selectOption("none");
+  await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+  await expect(page.getByText("Pažymėta: garantijos nėra")).toBeVisible();
+  await page.getByRole("link", { name: "Nustatymai" }).click();
+  await page.getByRole("button", { name: "Atsijungti" }).click();
+  await signIn(page, email);
+  await page.goto(`/pirkiniai/${id}`);
+  await expect(page.getByText("Pažymėta: garantijos nėra")).toBeVisible();
+  await stale.getByLabel("Prekės pavadinimas").fill("Pasenęs pakeitimas");
+  await stale.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+  await expect(stale.getByText(/Pirkinys pasikeitė kitur/)).toBeVisible();
+  await expect(stale.getByLabel("Prekės pavadinimas")).toHaveValue("Pasenęs pakeitimas");
+  await withAppDb(async (client) => {
+    const current = await client.query("SELECT warranty_state,warranty_end_date,warranty_duration_months,warranty_source FROM purchase WHERE id=$1", [id]);
+    expect(current.rows[0]).toMatchObject({ warranty_state: "none", warranty_end_date: null, warranty_duration_months: null, warranty_source: null });
+    await expect(client.query("UPDATE purchase SET warranty_state='known' WHERE id=$1", [id])).rejects.toMatchObject({ code: "23514" });
+    await expect(client.query("UPDATE purchase SET warranty_state='known',warranty_end_date='infinity',warranty_source='date' WHERE id=$1", [id])).rejects.toMatchObject({ code: "23514" });
+    const user = await client.query('SELECT id FROM "user" WHERE email=$1', [email]);
+    await client.query(`INSERT INTO purchase (owner_id,submission_key,product_name,seller,purchase_date)
+      SELECT $1,gen_random_uuid(),'Kita prekė ' || n,'Pardavėjas','2024-01-01' FROM generate_series(1,51) n`, [user.rows[0].id]);
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+    const today = `${parts.year}-${parts.month}-${parts.day}`;
+    for (const [name, days] of [["Greitai", 30], ["Vėliau", 31], ["Pasibaigusi", -1]] as const) {
+      await client.query(`INSERT INTO purchase (owner_id,submission_key,product_name,seller,purchase_date,warranty_state,warranty_end_date,warranty_source)
+        VALUES ($1,gen_random_uuid(),$2,'Pardavėjas','2024-01-01','known',$3::date + $4::integer,'date')`, [user.rows[0].id,name,today,days]);
+    }
+  });
+  await page.goto("/pirkiniai?sort=expiry");
+  await expect(page.locator(".purchase-card strong").first()).toHaveText("Greitai");
+  await expect(page.locator(".purchase-card strong").nth(1)).toHaveText("Vėliau");
+  await expect(page.locator(".purchase-card strong").nth(2)).toHaveText("Pasibaigusi");
+  await page.goto("/pirkiniai?warranty=valid");
+  await expect(page.locator(".purchase-card")).toHaveCount(2);
+  await page.goto("/pirkiniai?warranty=soon");
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
+  await expect(page.locator(".purchase-card")).toContainText("Greitai baigsis");
+  await page.goto("/pirkiniai?warranty=expired");
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
+  await expect(page.locator(".purchase-card")).toContainText("Pasibaigė");
+  await page.goto("/pirkiniai?warranty=none");
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
+  await expect(page.locator(".purchase-card")).toContainText("Ilga garantijos prekė");
+  await page.getByLabel("Garantijos filtras").selectOption("unknown");
+  await page.getByRole("button", { name: "Rodyti" }).click();
+  await expect(page.locator(".purchase-card")).toHaveCount(50);
+  await page.getByRole("link", { name: "Kitas puslapis" }).click();
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
+  await signIn(foreign, `warranty-other-${suffix}@example.test`);
+  await foreign.goto(`/pirkiniai/${id}`);
+  await expect(foreign.getByRole("heading", { name: "Pirkinys nerastas" })).toBeVisible();
+  await foreign.goto("/pirkiniai?warranty=none");
+  await expect(foreign.locator(".purchase-card")).toHaveCount(0);
+  await owner.close(); await other.close();
+});
+
+test("garantiją ir jos filtrą galima valdyti klaviatūra", async ({ page }) => {
+  await signIn(page, `warranty-keyboard-${Date.now()}@example.test`);
+  await page.goto("/pirkiniai/naujas");
+  await page.getByLabel("Prekės pavadinimas").fill("Klaviatūros garantija");
+  await page.getByLabel("Pardavėjas").fill("Pardavėjas");
+  await page.getByLabel("Pirkimo data").fill("2024-01-31");
+  const state = page.getByLabel("Garantijos būsena");
+  await tabTo(page, state);
+  await page.keyboard.press("n");
+  await expect(state).toHaveValue("known");
+  const mode = page.getByLabel("Kaip nurodysi pabaigą?");
+  await tabTo(page, mode);
+  await page.keyboard.press("n");
+  await expect(mode).toHaveValue("duration");
+  const months = page.getByLabel("Trukmė mėnesiais (1–600)");
+  await tabTo(page, months);
+  await page.keyboard.type("48");
+  const confirm = page.getByLabel(/Patvirtinu garantijos pabaigos datą/);
+  await tabTo(page, confirm);
+  await page.keyboard.press("Space");
+  await expect(confirm).toBeChecked();
+  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Klaviatūros garantija" })).toBeVisible();
+  await page.goto("/pirkiniai");
+  const filter = page.getByLabel("Garantijos filtras");
+  await expect(filter).toBeVisible();
+  await tabTo(page, filter);
+  await page.keyboard.press("p");
+  await expect(filter).toHaveValue("expired");
+  await tabTo(page, page.getByRole("button", { name: "Rodyti" }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await tabTo(page, page.getByRole("link", { name: "Išvalyti filtrus" }));
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
 });
 
 test("kita paskyra negali vykdyti žinomo įrašo keitimo ar trynimo veiksmo", async ({ browser }) => {

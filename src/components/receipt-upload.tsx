@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
+import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
+import { emptyWarranty } from "@/lib/warranty";
 
 const limit = 10485760;
 function newSubmissionKey() {
@@ -87,6 +89,7 @@ const labels: Record<keyof PurchaseFields,string> = { productName: "Prekės pava
 export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
   const router = useRouter(); const { file, setFile, url } = useSelectedFile();
   const [values, setValues] = useState(empty); const [purchaseKey] = useState(newSubmissionKey);
+  const [warranty, setWarranty] = useState(() => draftFromWarranty(emptyWarranty));
   const [uploadKey, setUploadKey] = useState(newSubmissionKey); const [purchaseId, setPurchaseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
   const createAttempted = useRef(false);
@@ -100,7 +103,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
       let id = savedPurchaseId;
       if (!id) {
         createAttempted.current = true;
-        const result = await fetch("/api/purchases", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: purchaseKey, fields: values }), signal: abort.signal });
+        const result = await fetch("/api/purchases", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: purchaseKey, fields: values, warranty }), signal: abort.signal });
         if (!result.ok) { if (result.status < 500) createAttempted.current = false; const body = await result.json().catch(() => ({})); throw new Error(body.errors ? Object.values(body.errors).join(" ") : body.error ?? "Pirkinio išsaugoti nepavyko."); }
         const saved = await result.json() as { id: string; fields: PurchaseFields; matchesSubmitted: boolean };
         id = saved.id; savedPurchaseId = id; setValues(saved.fields); setPurchaseId(id);
@@ -123,6 +126,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     <form className="purchase-form" onSubmit={save} noValidate><p className="small-note">{purchaseId ? "Pirkinys jau išsaugotas. Čia rodomi išsaugoti duomenys; bandant dar kartą įkeliamas tik čekis." : "Įvesk pirkinio duomenis. Čekio turinys automatiškai nenuskaitomas."}</p>
       {(Object.keys(labels) as (keyof PurchaseFields)[]).map((name) => <div className="field" key={name}><label htmlFor={`receipt-${name}`}>{labels[name]}</label>
         {name === "currency" ? <select id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })}><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option></select> : name === "notes" ? <textarea id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} maxLength={2000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} /> : <input id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} type={name === "purchaseDate" ? "date" : "text"} max={name === "purchaseDate" ? maxDate : undefined} maxLength={name === "productName" || name === "seller" ? 200 : undefined} value={values[name]} onChange={(event) => setValues({ ...values, [name]: event.target.value })} />}</div>)}
+      {!purchaseId && <WarrantyEditor value={warranty} onChange={setWarranty} purchaseDate={values.purchaseDate} initialPurchaseDate="" initialKnown={false} fields={false} />}
       <button className="primary-button" disabled={busy} type="submit">{busy ? "Įkeliama…" : purchaseId ? "Bandyti dar kartą" : "Išsaugoti pirkinį ir čekį"}</button>
       <button className="secondary-button" type="button" onClick={cancel}>Atšaukti</button></form></>}
     {message && <p className={message.includes("nepavyko") ? "form-error" : "notice"} role="status" aria-live="polite">{message}</p>}

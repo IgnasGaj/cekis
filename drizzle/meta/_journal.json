@@ -57,6 +57,13 @@
       "when": 1791301840912,
       "tag": "0007_watery_iron_man",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791309573012,
+      "tag": "0008_careful_black_cat",
+      "breakpoints": true
     }
   ]
 }

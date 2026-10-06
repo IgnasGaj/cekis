@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { parseReceiptText, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import type { PurchaseFields, PurchaseErrors } from "@/lib/purchase-validation";
+import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
+import type { WarrantyInput } from "@/lib/warranty";
 
 type ScanState = "idle" | "loading" | "ready" | "failed" | "cancelled" | "empty";
 const labels: Record<keyof PurchaseFields, string> = {
@@ -17,17 +19,18 @@ function stopOcrWorker(worker: Worker | null) {
   });
   worker.postMessage({ type: "cancel" });
 }
-export function ReceiptReview({ purchaseId, receiptId, filename, contentType, receiptNumber, initial, maxDate }: {
-  purchaseId: string; receiptId: string; filename: string; contentType: string; receiptNumber: string; initial: PurchaseFields; maxDate: string;
+export function ReceiptReview({ purchaseId, receiptId, filename, contentType, receiptNumber, initial, maxDate, initialWarranty, revision }: {
+  purchaseId: string; receiptId: string; filename: string; contentType: string; receiptNumber: string; initial: PurchaseFields; maxDate: string; initialWarranty: WarrantyInput; revision: number;
 }) {
   const router = useRouter();
   const [values, setValues] = useState(initial);
+  const [warranty, setWarranty] = useState(() => draftFromWarranty(initialWarranty));
   const [number, setNumber] = useState(receiptNumber);
   const [suggestions, setSuggestions] = useState<ReceiptSuggestions | null>(null);
   const [state, setState] = useState<ScanState>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
-  const [errors, setErrors] = useState<PurchaseErrors & { receiptNumber?: string }>({});
+  const [errors, setErrors] = useState<PurchaseErrors & { receiptNumber?: string; warranty?: string }>({});
   const [saving, setSaving] = useState(false);
   const active = useRef<{ worker: Worker | null; controller: AbortController; id: number } | null>(null);
   const sequence = useRef(0);
@@ -92,7 +95,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     event.preventDefault(); if (savingRef.current) return;
     savingRef.current = true; setSaving(true); setError(""); setErrors({});
     try {
-      const response = await fetch(`/api/receipts/${receiptId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseId, ...values, receiptNumber: number }) });
+      const response = await fetch(`/api/receipts/${receiptId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseId, ...values, ...warranty, expectedRevision: revision, receiptNumber: number }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) { setErrors(body.errors ?? {}); throw new Error(body.error ?? "Patikrink pažymėtus laukus ir bandyk dar kartą."); }
       router.push(`/pirkiniai/${purchaseId}?busena=atnaujinta`); router.refresh();
@@ -127,6 +130,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
         </select>{errors.currency && <p className="form-error">{errors.currency}</p>}</div>
         <div className="field"><label htmlFor="review-number">Čekio numeris (neprivaloma)</label><input id="review-number" value={number} maxLength={100} onChange={(event) => { setNumber(event.target.value); setErrors((prior) => ({ ...prior, receiptNumber: undefined })); }} aria-invalid={Boolean(errors.receiptNumber)} />{hint("receiptNumber")}{errors.receiptNumber && <p className="form-error">{errors.receiptNumber}</p>}</div>
         <div className="field"><label htmlFor="review-notes">Pastabos (neprivaloma)</label><textarea id="review-notes" value={values.notes} maxLength={2000} rows={4} onChange={(event) => setField("notes", event.target.value)} />{errors.notes && <p className="form-error">{errors.notes}</p>}</div>
+        <WarrantyEditor value={warranty} onChange={setWarranty} purchaseDate={values.purchaseDate} initialPurchaseDate={initial.purchaseDate} initialKnown={initialWarranty.warrantyState === "known"} error={errors.warranty} fields={false} />
         <button className="primary-button" type="submit">{saving ? "Išsaugoma…" : "Išsaugoti"}</button>
       </fieldset>
     </form>

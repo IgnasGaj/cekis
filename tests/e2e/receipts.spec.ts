@@ -675,3 +675,41 @@ test("čekio peržiūrą galima valdyti klaviatūra", async ({ page }) => {
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("K-KEY-001");
 });
+
+test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", async ({ page }) => {
+  const email = `warranty-review-${randomUUID()}@example.test`;
+  await signIn(page, email);
+  const purchaseId = await createPurchase(page, "Garantijos čekis");
+  await page.goto(`/pirkiniai/${purchaseId}/redaguoti`);
+  await page.getByLabel("Garantijos būsena").selectOption("known");
+  await page.getByLabel("Garantijos pabaigos data").fill("2028-01-01");
+  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
+  await expect(page.getByText("Pabaigos data:")).toContainText("2028");
+  const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+  const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "garantija.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: png });
+  expect(uploaded.status()).toBe(200);
+  const receiptId = (await uploaded.json()).id as string;
+  await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  await page.getByLabel("Pirkimo data").fill("2024-02-01");
+  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).not.toBeChecked();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByText("Patvirtink pasirinktą garantijos pabaigos datą.")).toBeVisible();
+  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByText("Pabaigos data:")).toContainText("2028");
+  await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  const stale = await page.context().newPage(); await stale.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await page.getByLabel("Prekės pavadinimas").fill("Naujesnis įrašas");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Naujesnis įrašas" })).toBeVisible();
+  await stale.getByLabel("Prekės pavadinimas").fill("Pasenęs įrašas");
+  await stale.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(stale.getByText(/Pirkinys pasikeitė kitur/)).toBeVisible();
+  await expect(stale.getByLabel("Prekės pavadinimas")).toHaveValue("Pasenęs įrašas");
+  await db(async (client) => {
+    const result = await client.query("SELECT product_name,warranty_state,warranty_end_date::text FROM purchase WHERE id=$1", [purchaseId]);
+    expect(result.rows[0]).toMatchObject({ product_name: "Naujesnis įrašas", warranty_state: "known", warranty_end_date: "2028-01-01" });
+  });
+});

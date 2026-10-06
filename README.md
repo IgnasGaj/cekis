@@ -1,6 +1,6 @@
 # Čekis
 
-Sprint 3 adds private original receipt uploads to the existing passwordless account and purchase vault. JPEG, PNG and PDF originals live in a private S3-compatible bucket and can be linked to purchases. OCR and warranty tracking follow in later sprints. The [roadmap](docs/roadmap.md) defines product scope; [Sprint 3 storage decisions](docs/decisions/sprint-03-private-storage.md) record this slice.
+Čekis keeps purchases, private original receipts, reviewed OCR suggestions and user-confirmed warranty dates in one account. JPEG, PNG and PDF originals live in a private S3-compatible bucket and can be linked to purchases. The [roadmap](docs/roadmap.md) defines product scope; [Sprint 3 storage decisions](docs/decisions/sprint-03-private-storage.md) record the receipt architecture.
 
 ## Requirements
 
@@ -53,6 +53,7 @@ npm run receipts:cleanup
 npm run lint
 npm run typecheck
 npm test
+npm run test:db
 npm run test:e2e
 npm run build
 npm run start
@@ -75,7 +76,15 @@ Sign in, then open **Pirkiniai** or **+ Čekis → Įvesti rankiniu būdu**. The
 
 Product and seller are required trimmed text (1–200 characters); notes are optional plain text (up to 2,000). Purchase date is a real `YYYY-MM-DD` calendar day no later than **today in Europe/Vilnius**; the form leaves it blank until entered. Price is optional exact `numeric(12,2)`, from 0 to 9,999,999,999.99, with a comma or point decimal separator and at most two decimals. Grouping separators are not accepted. Currency is stored only with a price; supported codes are EUR, USD, GBP and PLN. The form defaults to EUR. The database rejects a price without a currency, including writes outside the form. Migration 0003 checks for existing priced rows with null currency and stops for explicit correction; it never assumes EUR. All price values remain decimal strings on the server; there is no conversion or floating-point money arithmetic. Ties in purchase-date ordering use creation timestamp then ID in the same direction. Search is case-insensitive with literal `%` and `_`; accent folding is not enabled.
 
-Every purchase says **Garantija nenurodyta**. The receipt section shows **Čekis nepridėtas** until a real original is linked. Sprint 5 will add reviewed warranty states (unknown, none, known) through a separate migration; no warranty value is inferred today.
+The receipt section shows **Čekis nepridėtas** until a real original is linked. Warranty starts as **Garantija nenurodyta** and is never inferred from the purchase or OCR text.
+
+## Warranty tracking (Sprint 5)
+
+Each purchase stores `unknown`, `none`, or `known` independently of its receipts. `unknown` means no confirmed information; `none` is an explicit user choice. A `known` warranty has a confirmed PostgreSQL calendar end date. Users can type the date or enter 1–600 whole months to see a suggestion based on the purchase date. Month addition happens once and clamps the original day to the target month's last day (for example, 2026-01-31 plus two months is 2026-03-31). No default duration or legal entitlement is assumed. Changing the date, duration, mode or purchase date clears confirmation; changing a saved purchase date leaves its saved end date visible for deliberate review.
+
+The saved end date is inclusive. Status uses one Europe/Vilnius calendar date per list response: dates before today are **Pasibaigė**, today through 30 days ahead are **Greitai baigsis**, and later dates are **Galioja**. The list's **Galioja** filter includes the soon-expiring subset; **Garantija nenurodyta** and **Pažymėta: garantijos nėra** select separate states. Sorting **Pagal artimiausią garantijos pabaigą** places unexpired known dates first in ascending order, expired dates next with the most recent first, then unknown/none. Creation time and ID settle ties. Search, filtering and sorting happen on the owner-scoped query before 50-item pagination. Filters and sort stay in the URL.
+
+Migration 0008 backfills legacy purchases as unknown without adding a date. `purchase.revision` protects purchase and OCR review edits from overwriting a newer save; conflicts preserve the form and ask for reload/review. Ordinary saves that omit warranty fields preserve stored warranty data. `npm run test:db` creates and removes a disposable PostgreSQL database to verify upgrade, repeat migration, constraints, receipt associations and the limited app role. It requires `.env.test.local` pointing to the dedicated `cekis_test` database and a migration role allowed to create databases.
 
 Next.js 16 separates development output under `.next/dev` from production output under `.next`. `npm run typecheck` generates route types first; `next-env.d.ts` is generated and ignored by Git. If a build or server gets into a bad state, stop the relevant process, then rerun the command. Never remove output files while that process is running.
 

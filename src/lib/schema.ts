@@ -70,6 +70,11 @@ export const purchase = pgTable("purchase", {
   price: numeric("price", { precision: 12, scale: 2 }),
   currency: text("currency"),
   notes: text("notes"),
+  warrantyState: text("warranty_state").notNull().default("unknown"),
+  warrantyEndDate: date("warranty_end_date"),
+  warrantyDurationMonths: integer("warranty_duration_months"),
+  warrantySource: text("warranty_source"),
+  revision: integer("revision").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -77,11 +82,15 @@ export const purchase = pgTable("purchase", {
   uniqueIndex("purchase_owner_submission_idx").on(table.ownerId, table.submissionKey),
   uniqueIndex("purchase_owner_id_idx").on(table.ownerId, table.id),
   index("purchase_owner_date_idx").on(table.ownerId, table.purchaseDate.desc(), table.createdAt.desc(), table.id.desc()),
+  index("purchase_owner_warranty_idx").on(table.ownerId, table.warrantyState, table.warrantyEndDate, table.createdAt, table.id),
   check("purchase_product_name_check", sql`length(${table.productName}) between 1 and 200 and ${table.productName} = btrim(${table.productName})`),
   check("purchase_seller_check", sql`length(${table.seller}) between 1 and 200 and ${table.seller} = btrim(${table.seller})`),
   check("purchase_notes_check", sql`${table.notes} is null or length(${table.notes}) <= 2000`),
   check("purchase_price_check", sql`${table.price} is null or (${table.price} >= 0 and ${table.price} <= 9999999999.99)`),
   check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
+  check("purchase_date_finite_check", sql`${table.purchaseDate} between date '0001-01-01' and date '9999-12-31'`),
+  check("purchase_revision_check", sql`${table.revision} >= 1`),
+  check("purchase_warranty_check", sql`(${table.warrantyState} in ('unknown','none') and ${table.warrantyEndDate} is null and ${table.warrantyDurationMonths} is null and ${table.warrantySource} is null) or (${table.warrantyState} = 'known' and ${table.warrantyEndDate} is not null and ${table.warrantyEndDate} between date '0001-01-01' and date '9999-12-31' and ${table.warrantyEndDate} >= ${table.purchaseDate} and ${table.warrantySource} is not null and ${table.warrantySource} in ('date','duration') and ((${table.warrantySource} = 'date' and ${table.warrantyDurationMonths} is null) or (${table.warrantySource} = 'duration' and ${table.warrantyDurationMonths} is not null and ${table.warrantyDurationMonths} between 1 and 600)))`),
 ]);
 
 export const receipt = pgTable("receipt", {

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "scripts": {
     "test": "vitest run",
+    "test:db": "node tests/integration/migration.mjs",
     "test:lint-rules": "node scripts/check-lint-rules.mjs",
     "dev": "next dev --hostname 127.0.0.1 --port 3100",
     "build": "next build",
