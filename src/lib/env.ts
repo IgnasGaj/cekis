@@ -1,11 +1,20 @@
 import "server-only";
 import { z } from "zod";
 
+function isPrivateLanIPv4(hostname: string) {
+  const parts = hostname.split(".").map(Number);
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) &&
+    (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
+}
+
 const schema = z.object({
   DATABASE_URL: z.url().startsWith("postgres"),
   APP_URL: z.url().refine((value) => {
     const url = new URL(value);
-    return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
+    return url.protocol === "https:" || (url.protocol === "http:" && (
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
+      (process.env.NODE_ENV === "development" && isPrivateLanIPv4(url.hostname))
+    ));
   }, "Naudok HTTPS arba vietinį adresą"),
   BETTER_AUTH_SECRET: z.string().min(32).refine((value) => !value.startsWith("replace-with-")),
   SMTP_HOST: z.string().min(1),

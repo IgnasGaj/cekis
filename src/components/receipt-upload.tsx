@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
 
 const limit = 10485760;
+function newSubmissionKey() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 async function errorMessage(response: Response) {
   const body = await response.json().catch(() => ({}));
   return typeof body.error === "string" ? body.error : "Įkelti nepavyko. Bandyk dar kartą.";
@@ -53,19 +60,19 @@ function Preview({ file, url }: { file: File; url: string | null }) {
 }
 export function ExistingPurchaseUploader({ purchaseId }: { purchaseId: string }) {
   const router = useRouter(); const { file, setFile, url } = useSelectedFile();
-  const [key, setKey] = useState(() => crypto.randomUUID()); const [busy, setBusy] = useState(false);
+  const [key, setKey] = useState(newSubmissionKey); const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
-  const choose = async (next: File) => { if (file) { try { await cancelReceipt(key); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setKey(crypto.randomUUID()); setMessage(""); };
+  const choose = async (next: File) => { if (file) { try { await cancelReceipt(key); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setKey(newSubmissionKey()); setMessage(""); };
   const upload = async () => {
     if (!file) return;
     if (!file.size || file.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; }
     const abort = new AbortController(); controller.current = abort; setBusy(true); setMessage("Įkeliama…");
-    try { await sendReceipt(file,purchaseId,key,abort.signal); setMessage("Čekis pridėtas"); setFile(null); setKey(crypto.randomUUID()); router.refresh(); }
+    try { await sendReceipt(file,purchaseId,key,abort.signal); setMessage("Čekis pridėtas"); setFile(null); setKey(newSubmissionKey()); router.refresh(); }
     catch (error) { if (!abort.signal.aborted) setMessage(error instanceof Error ? error.message : "Įkelti nepavyko. Bandyk dar kartą."); }
     finally { setBusy(false); controller.current = null; }
   };
   const cancel = async () => { controller.current?.abort(); setBusy(false);
-    try { await cancelReceipt(key); setFile(null); setKey(crypto.randomUUID()); setMessage("Įkėlimas atšauktas."); router.refresh(); }
+    try { await cancelReceipt(key); setFile(null); setKey(newSubmissionKey()); setMessage("Įkėlimas atšauktas."); router.refresh(); }
     catch { setMessage("Atšaukti nepavyko. Bandyk dar kartą."); }
   };
   return <section className="receipt-upload"><h3>Pridėti čekį</h3><FileChoices onFile={choose} disabled={busy} />
@@ -77,10 +84,10 @@ const empty: PurchaseFields = { productName: "", seller: "", purchaseDate: "", p
 const labels: Record<keyof PurchaseFields,string> = { productName: "Prekės pavadinimas", seller: "Pardavėjas", purchaseDate: "Pirkimo data", price: "Kaina (neprivaloma)", currency: "Valiuta", notes: "Pastabos (neprivaloma)" };
 export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
   const router = useRouter(); const { file, setFile, url } = useSelectedFile();
-  const [values, setValues] = useState(empty); const [purchaseKey] = useState(() => crypto.randomUUID());
-  const [uploadKey, setUploadKey] = useState(() => crypto.randomUUID()); const [purchaseId, setPurchaseId] = useState<string | null>(null);
+  const [values, setValues] = useState(empty); const [purchaseKey] = useState(newSubmissionKey);
+  const [uploadKey, setUploadKey] = useState(newSubmissionKey); const [purchaseId, setPurchaseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
-  const choose = async (next: File) => { if (file) { try { await cancelReceipt(uploadKey); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setUploadKey(crypto.randomUUID()); setMessage(""); };
+  const choose = async (next: File) => { if (file) { try { await cancelReceipt(uploadKey); } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } setFile(next); setUploadKey(newSubmissionKey()); setMessage(""); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); if (!file) return;
     if (!file.size || file.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; }
@@ -100,7 +107,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     finally { controller.current = null; setBusy(false); }
   };
   const cancel = async () => { controller.current?.abort(); setBusy(false);
-    try { await cancelReceipt(uploadKey); setFile(null); setUploadKey(crypto.randomUUID()); setMessage(purchaseId ? "Pirkinys išsaugotas be čekio." : "Įkėlimas atšauktas."); }
+    try { await cancelReceipt(uploadKey); setFile(null); setUploadKey(newSubmissionKey()); setMessage(purchaseId ? "Pirkinys išsaugotas be čekio." : "Įkėlimas atšauktas."); }
     catch { setMessage("Atšaukti nepavyko. Bandyk dar kartą."); }
   };
   return <><FileChoices onFile={choose} disabled={busy} />{file && <><Preview file={file} url={url} />

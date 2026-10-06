@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const config: NextConfig = {
   // Next 16 separates development output at .next/dev by default.
+  allowedDevOrigins: process.env.NODE_ENV === "development" && process.env.APP_URL
+    ? [new URL(process.env.APP_URL).hostname]
+    : undefined,
   poweredByHeader: false,
   turbopack: { root: process.cwd() },
   agentRules: false,
