@@ -15,6 +15,13 @@
       "when": 1791202075742,
       "tag": "0001_wise_black_widow",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791265789384,
+      "tag": "0002_chemical_joseph",
+      "breakpoints": true
     }
   ]
 }

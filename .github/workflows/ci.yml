@@ -42,7 +42,9 @@ jobs:
       - run: npm audit
       - run: npm audit --omit=dev
       - run: npm run db:migrate
+      - run: npm run db:migrate
       - run: npm run db:grant
+      - run: npm run db:check-role
       - run: npm run lint
       - run: npm run test:lint-rules
       - run: npm run typecheck

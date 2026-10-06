@@ -2,12 +2,14 @@ import { Mail, LogOut, ShieldCheck } from "lucide-react";
 import { BottomNav } from "@/components/bottom-nav";
 import { requireSession } from "@/lib/session";
 import { SignOutButton } from "./sign-out-button";
+import { SessionRefresh } from "@/components/session-refresh";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const current = await requireSession();
   return <main className="app-shell">
+    <SessionRefresh />
     <header className="app-header"><span className="wordmark">Čekis</span></header>
     <section className="page-heading"><h1>Nustatymai</h1><p>Tavo paskyra</p></section>
     <section className="settings-card" aria-label="Paskyros informacija">

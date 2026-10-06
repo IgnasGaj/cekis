@@ -14,7 +14,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   use: { baseURL: appURL.origin, ...devices["Desktop Chrome"] },
   webServer: {
-    command: "npm run dev",
+    command: `npx next dev --hostname 127.0.0.1 --port ${appURL.port}`,
     url: `${appURL.origin}/prisijungti`,
     reuseExistingServer: false,
     timeout: 120_000,

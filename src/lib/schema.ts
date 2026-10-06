@@ -1,4 +1,5 @@
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, index, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -58,3 +59,26 @@ export const emailSendLimit = pgTable("email_send_limit", {
   count: integer("count").notNull(),
   windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
 });
+
+export const purchase = pgTable("purchase", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  submissionKey: uuid("submission_key").notNull(),
+  productName: text("product_name").notNull(),
+  seller: text("seller").notNull(),
+  purchaseDate: date("purchase_date").notNull(),
+  price: numeric("price", { precision: 12, scale: 2 }),
+  currency: text("currency"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("purchase_owner_submission_idx").on(table.ownerId, table.submissionKey),
+  index("purchase_owner_date_idx").on(table.ownerId, table.purchaseDate.desc(), table.createdAt.desc(), table.id.desc()),
+  check("purchase_product_name_check", sql`length(${table.productName}) between 1 and 200 and ${table.productName} = btrim(${table.productName})`),
+  check("purchase_seller_check", sql`length(${table.seller}) between 1 and 200 and ${table.seller} = btrim(${table.seller})`),
+  check("purchase_notes_check", sql`${table.notes} is null or length(${table.notes}) <= 2000`),
+  check("purchase_price_check", sql`${table.price} is null or (${table.price} >= 0 and ${table.price} <= 9999999999.99)`),
+  check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
+]);

@@ -6,6 +6,9 @@ const config: NextConfig = {
   turbopack: { root: process.cwd() },
   agentRules: false,
   logging: { incomingRequests: { ignore: [/\/api\/auth\/magic-link\/verify/] } },
+  async headers() {
+    return ["/pradzia", "/nustatymai", "/prideti", "/pirkiniai", "/pirkiniai/:path*"].map((source) => ({ source, headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }] }));
+  },
 };
 
 export default config;

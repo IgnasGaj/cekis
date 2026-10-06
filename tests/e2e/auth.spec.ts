@@ -60,11 +60,11 @@ test("tikras el. pašto nuorodos gyvavimo ciklas ir paskyrų izoliacija", async 
   await expect(pageA).toHaveURL(/\/pradzia/);
   await expect(pageA.getByRole("heading", { name: /Labas/ })).toBeVisible();
   await pageA.reload();
-  await expect(pageA.getByText("Kol kas čia tuščia")).toBeVisible();
+  await expect(pageA.getByText("Tvarkyk pirkinius vienoje vietoje")).toBeVisible();
   await pageA.getByRole("link", { name: "Nustatymai" }).click();
   await expect(pageA.getByText(emailA)).toBeVisible();
   await expect(pageA.getByText(emailB)).toHaveCount(0);
-  await expect(pageA.locator('.nav-item.unavailable').filter({ hasText: "Pirkiniai" })).toHaveAttribute("aria-disabled", "true");
+  await expect(pageA.getByRole("link", { name: "Pirkiniai" })).toHaveAttribute("href", "/pirkiniai");
 
   const b = await browser.newContext({ viewport: { width: 320, height: 720 } });
   const pageB = await b.newPage();

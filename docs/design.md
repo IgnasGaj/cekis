@@ -12,3 +12,7 @@ The supplied files are PNG copies of the named reference screens. All four were 
 Approximate tokens: background `#faf9f6`, surface `#fff`, dark text `#0c2830`, muted text `#65717d`, teal `#277d78`, teal tint `#eaf5f2`, border `#e2e8e6`. Teal was darkened for readable text and controls. Cards use roughly 13–16 px radii; headings are 28–34 px. Layout starts at 320/390 px and centers at 680 px on desktop. The bottom nav includes safe-area padding and a 44 px or larger active touch target.
 
 Only Home and Settings are active. Pirkiniai and Čekis retain their positions but are visibly unavailable, have accessible explanatory text and do not navigate. No bell, fake notification count, purchase content or warranty example appears in Sprint 1.
+
+## Sprint 2 adaptation
+
+The same four inspected PNG references guide the purchase list cards, field rows, add action and detail metadata. The device frames, product imagery and receipt previews remain reference material only. Pirkiniai now opens the private list. + Čekis opens a small add screen with one working manual-entry action and a clear notice that file capture and upload follow later. Home links to manual entry and the list without showing fabricated purchases or warranty totals. Detail uses real saved metadata, an empty attachment card and `Garantija nenurodyta`.
