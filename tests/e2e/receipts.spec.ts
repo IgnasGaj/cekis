@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
@@ -36,6 +36,16 @@ async function createPurchase(page: Page, name: string) {
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+/);
   return new URL(page.url()).pathname.split("/").pop()!;
+}
+async function tabTo(page: Page, control: Locator) {
+  for (let step = 0; step < 60; step++) {
+    if (await control.evaluate((element) => element === document.activeElement)) {
+      expect(await control.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+      return;
+    }
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Keyboard could not reach the review control");
 }
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 async function db<T>(work: (client: Client) => Promise<T>) {
@@ -572,6 +582,7 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
     { name: "dviprasme-data", lines: ["PREKYBOS CENTRAS", "Data 2026-10-05", "Data 2026-10-06", "Terminal ID 123456", "Preke 12,30 EUR"] },
     { name: "nepalaikoma-valiuta", lines: ["PREKYBOS CENTRAS", "Preke 12,30 CZK", "Total 12,30 CZK", "Data 2026-10-05"] },
   ];
+  let confirmedName = "Rankiniu būdu patvirtinta prekė";
   for (const variant of variants) {
     const body = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="900"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="46" fill="black">${variant.lines.map((line, index) => `<text x="65" y="${100 + index * 85}">${line}</text>`).join("")}</g></svg>`;
     const image = sharp(Buffer.from(body));
@@ -585,7 +596,14 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
     await expect(page.getByText(/Nuskaityta\. Peržiūrėk pasiūlymus\.|Teksto atpažinti nepavyko\.|Nepavyko nuskaityti čekio\./)).toBeVisible({ timeout: 30000 });
     console.log(`${variant.name} OCR: ${Date.now() - started} ms`);
     await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
-    await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue("Rankiniu būdu patvirtinta prekė");
+    await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue(confirmedName);
+    if (variant.name === "keli-produktai") {
+      await expect(page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas") }).getByText("Rasti keli galimi variantai. Patikrink čekį ir įvesk pats.")).toBeVisible();
+      confirmedName = "Kelių prekių čekis, pasirinkta rankiniu būdu";
+      await page.getByLabel("Prekės pavadinimas").fill(confirmedName);
+      await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+      await expect(page.getByRole("heading", { name: confirmedName })).toBeVisible();
+    }
     if (variant.name === "nepalaikoma-valiuta") await expect(page.getByText("Čekio suma").locator("..")).not.toContainText("EUR");
     expect(sha(await (await page.request.get(`/api/receipts/${variantId}/content`)).body())).toBe(sha(bytes));
   }
@@ -598,4 +616,62 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   expect((await anonymous.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(401);
   expect((await anonymous.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload })).status()).toBe(401);
   await anonymous.close(); await owner.close(); await other.close();
+});
+
+test("čekio peržiūrą galima valdyti klaviatūra", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `ocr-keyboard-${randomUUID()}@example.test`);
+  const purchaseId = await createPurchase(page, "Klaviatūros bandymas");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="40" fill="black"><text x="50" y="90">PREKYBOS CENTRAS</text><text x="50" y="170">Preke 19,90 EUR</text><text x="50" y="250">Is viso 19,90 EUR</text></g></svg>`;
+  const bytes = await sharp(Buffer.from(svg)).png().toBuffer();
+  const upload = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "klaviatura.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: bytes });
+  expect(upload.status()).toBe(200);
+  const receiptId = (await upload.json()).id as string;
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  const reviewLink = page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" });
+  await tabTo(page, reviewLink);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
+  const contentPath = `**/api/receipts/${receiptId}/content`;
+  let releaseScan: (() => void) | undefined;
+  await page.route(contentPath, async (route) => {
+    if (route.request().resourceType() !== "fetch") return route.continue();
+    await new Promise<void>((resolve) => { releaseScan = resolve; });
+    await route.continue().catch(() => {});
+  });
+  await tabTo(page, page.getByRole("button", { name: "Nuskaityti čekį" }));
+  await page.keyboard.press("Enter");
+  await expect.poll(() => Boolean(releaseScan)).toBe(true);
+  await tabTo(page, page.getByRole("button", { name: "Atšaukti nuskaitymą" }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Nuskaitymas atšauktas. Čekis išsaugotas.")).toBeVisible();
+  releaseScan?.();
+  await page.unroute(contentPath);
+  await tabTo(page, page.getByRole("button", { name: "Bandyti dar kartą" }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(/Nuskaityta\. Peržiūrėk pasiūlymus\.|Teksto atpažinti nepavyko\./)).toBeVisible({ timeout: 30000 });
+  await tabTo(page, page.getByRole("link", { name: "Įvesti rankiniu būdu" }));
+  await page.keyboard.press("Enter");
+  const product = page.getByLabel("Prekės pavadinimas");
+  await tabTo(page, product);
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("Klaviatūra patvirtinta prekė");
+  await tabTo(page, page.getByLabel("Pardavėjas"));
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.type("Prekybos centras");
+  await tabTo(page, page.getByLabel("Pirkimo data"));
+  await tabTo(page, page.getByLabel("Prekės kaina (neprivaloma)"));
+  await page.keyboard.type("19,90");
+  const currency = page.getByLabel("Prekės kainos valiuta");
+  await tabTo(page, currency);
+  await page.keyboard.press("e");
+  await page.keyboard.press("Tab");
+  await expect(currency).toHaveValue("EUR");
+  await tabTo(page, page.getByLabel("Čekio numeris (neprivaloma)"));
+  await page.keyboard.type("K-KEY-001");
+  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Klaviatūra patvirtinta prekė" })).toBeVisible();
+  await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("K-KEY-001");
 });

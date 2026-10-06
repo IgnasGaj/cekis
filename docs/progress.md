@@ -43,3 +43,5 @@ The Sprint 3 audit identified three recovery and abuse-control corrections. The 
 ## Sprint 4 OCR and receipt review, 2026-10-06
 
 The `feature/sprint-04-ocr-review` branch adds on-demand local Lithuanian/English image OCR, conservative suggestions, an owner-scoped review page, explicit PDF manual entry, and confirmed receipt-number storage via migration 0007. OCR does not persist text or modify originals. The verification and delivery record is in `sources/sprint-04-completion-report.md`. Warranty tracking remains Sprint 5.
+
+The post-sprint audit's minor corrections update the delivery record and strengthen browser evidence for keyboard-only review and visible ambiguity guidance. The correction run passed 26 unit tests, 27 real-auth browser tests, lint, lint-rule fixtures, typecheck and production build. Physical-device testing remains unrun.
