@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "./db";
 import { purchase } from "./schema";
 import { requireSession } from "./session";
@@ -36,7 +36,14 @@ export async function listPurchases(params: ReturnType<typeof listParams>) {
     ? [asc(purchase.purchaseDate), asc(purchase.createdAt), asc(purchase.id)]
     : [desc(purchase.purchaseDate), desc(purchase.createdAt), desc(purchase.id)];
   const rows = await db.select().from(purchase).where(where).orderBy(...order).limit(51).offset((params.page - 1) * 50);
-  return { rows: rows.slice(0, 50), hasNext: rows.length > 50 };
+  if (params.page > 1 && rows.length === 0) {
+    // Use the same owner/search predicate. A concurrent write may change the count,
+    // so always move strictly toward page 1 to avoid a redirect loop.
+    const [{ total }] = await db.select({ total: count() }).from(purchase).where(where);
+    const lastPage = Math.max(1, Math.ceil(total / 50));
+    return { rows: [], hasNext: false, redirectPage: Math.min(params.page - 1, lastPage) };
+  }
+  return { rows: rows.slice(0, 50), hasNext: rows.length > 50, redirectPage: null };
 }
 
 export async function getPurchase(id: string) {

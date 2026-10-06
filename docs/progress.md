@@ -1,5 +1,9 @@
 # Progress
 
+## Sprint 2 audit corrections, 2026-10-06
+
+The supplied post-sprint audit found a nullable CHECK expression that let PostgreSQL accept a price without currency, and a false empty state after deleting the sole item on a later list page. Forward migration 0003 adds explicit `currency IS NOT NULL` and a preflight check for affected rows; migration 0002 remains unchanged. The list now normalizes stale/out-of-range pages with an owner- and search-scoped count, preserving sort and deletion feedback. Focused PostgreSQL constraint and browser pagination cases were added. The detailed correction evidence is in `sources/sprint-02-audit-correction-report.md`.
+
 ## Sprint 2 — purchase vault, 2026-10-06
 
 The manual purchase vault is implemented on `feature/sprint-02-purchase-vault`. Purchase records use one versioned PostgreSQL table with owner-scoped Drizzle reads and mutations, exact decimal strings, Europe/Vilnius calendar validation, and an owner-bound submission key. The Lithuanian list, search, date sort, detail, create, edit, delete confirmation, add entry and honest receipt/warranty placeholders are active. Deleted rows retain a scrubbed replay tombstone so a retry cannot restore a deleted purchase.

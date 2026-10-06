@@ -80,5 +80,5 @@ export const purchase = pgTable("purchase", {
   check("purchase_seller_check", sql`length(${table.seller}) between 1 and 200 and ${table.seller} = btrim(${table.seller})`),
   check("purchase_notes_check", sql`${table.notes} is null or length(${table.notes}) <= 2000`),
   check("purchase_price_check", sql`${table.price} is null or (${table.price} >= 0 and ${table.price} <= 9999999999.99)`),
-  check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
+  check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
 ]);

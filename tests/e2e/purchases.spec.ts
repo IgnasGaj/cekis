@@ -232,6 +232,86 @@ test("50 įrašų puslapiai nepaslepia likusių pirkinių", async ({ page }) => 
   await expect(page.locator(".purchase-card")).toHaveCount(1);
   await page.getByRole("link", { name: "Ankstesnis puslapis" }).click();
   await expect(page.locator(".purchase-card")).toHaveCount(50);
+  await page.getByRole("link", { name: "Kitas puslapis" }).click();
+  await expect(page).toHaveURL(/page=2/);
+  await expect(page.locator(".purchase-card")).toHaveCount(1);
+  await page.locator(".purchase-card").click();
+  await page.getByRole("button", { name: "Ištrinti pirkinį" }).click();
+  await page.getByRole("button", { name: "Ištrinti", exact: true }).click();
+  await expect(page).toHaveURL(/\/pirkiniai\?sort=oldest&busena=istrinta$/);
+  await expect(page.locator(".purchase-card")).toHaveCount(50);
+  await expect(page.getByRole("heading", { name: "Dar neturi pirkinių" })).toHaveCount(0);
+  await page.goto("/pirkiniai?page=999&sort=oldest");
+  await expect(page).toHaveURL(/\/pirkiniai\?sort=oldest$/);
+  await expect(page.locator(".purchase-card")).toHaveCount(50);
+  await page.goto("/pirkiniai?page=999&q=nerasta&sort=oldest");
+  await expect(page).toHaveURL(/\/pirkiniai\?q=nerasta&sort=oldest$/);
+  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await page.goto("/pirkiniai?sort=oldest");
+  await expect(page.locator(".purchase-card")).toHaveCount(50);
+});
+
+test("filtruoto paskutinio puslapio ištrynimas ir tikras tuščias sąrašas", async ({ browser }) => {
+  const suffix = Date.now();
+  const owner = await browser.newContext();
+  const other = await browser.newContext();
+  const a = await owner.newPage();
+  const b = await other.newPage();
+  const emailA = `filtered-a-${suffix}@example.test`;
+  const emailB = `filtered-b-${suffix}@example.test`;
+  await signIn(a, emailA);
+  await signIn(b, emailB);
+  await a.goto("/pirkiniai?page=999");
+  await expect(a).toHaveURL(/\/pirkiniai$/);
+  await expect(a.getByRole("heading", { name: "Dar neturi pirkinių" })).toBeVisible();
+  await withAppDb(async (client) => {
+    const users = await client.query('SELECT id, email FROM "user" WHERE email = ANY($1)', [[emailA, emailB]]);
+    const ids = new Map(users.rows.map((row) => [row.email, row.id]));
+    await client.query(`INSERT INTO purchase (owner_id, submission_key, product_name, seller, purchase_date)
+      SELECT $1, gen_random_uuid(), 'Filtruota prekė ' || n, 'Pardavėjas', '2024-01-01'
+      FROM generate_series(1, 51) AS n`, [ids.get(emailA)]);
+    await client.query(`INSERT INTO purchase (owner_id, submission_key, product_name, seller, purchase_date)
+      SELECT $1, gen_random_uuid(), 'Kito savininko prekė ' || n, 'Pardavėjas', '2024-01-01'
+      FROM generate_series(1, 51) AS n`, [ids.get(emailB)]);
+  });
+  await a.goto("/pirkiniai?q=Filtruota&sort=oldest&page=2");
+  await expect(a.locator(".purchase-card")).toHaveCount(1);
+  await a.locator(".purchase-card").click();
+  await a.getByRole("button", { name: "Ištrinti pirkinį" }).click();
+  await a.getByRole("button", { name: "Ištrinti", exact: true }).click();
+  await expect(a).toHaveURL(/\/pirkiniai\?q=Filtruota&sort=oldest&busena=istrinta$/);
+  await expect(a.locator(".purchase-card")).toHaveCount(50);
+  await a.goto("/pirkiniai?q=Filtruota&sort=oldest&page=999");
+  await expect(a).toHaveURL(/\/pirkiniai\?q=Filtruota&sort=oldest$/);
+  await a.goto("/pirkiniai?q=neatitinka&page=999");
+  await expect(a).toHaveURL(/\/pirkiniai\?q=neatitinka$/);
+  await expect(a.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await a.goto("/pirkiniai?q=Kito&page=999");
+  await expect(a).toHaveURL(/\/pirkiniai\?q=Kito$/);
+  await expect(a.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await b.goto("/pirkiniai?page=999");
+  await expect(b).toHaveURL(/\/pirkiniai\?page=2$/);
+  await expect(b.locator(".purchase-card")).toHaveCount(1);
+  await owner.close(); await other.close();
+});
+
+test("duomenų bazė reikalauja valiutos prie kainos su ribota role", async ({ page }) => {
+  const email = `currency-check-${Date.now()}@example.test`;
+  await signIn(page, email);
+  await withAppDb(async (client) => {
+    const user = await client.query('SELECT id FROM "user" WHERE email = $1', [email]);
+    const ownerId = user.rows[0].id;
+    async function insert(price: string | null, currency: string | null) {
+      return client.query(`INSERT INTO purchase (owner_id, submission_key, product_name, seller, purchase_date, price, currency)
+        VALUES ($1, gen_random_uuid(), 'Bandomoji prekė', 'Pardavėjas', '2024-01-01', $2, $3)
+        RETURNING price::text, currency`, [ownerId, price, currency]);
+    }
+    await expect(insert("12.50", null)).rejects.toMatchObject({ code: "23514" });
+    await expect(insert("12.50", "JPY")).rejects.toMatchObject({ code: "23514" });
+    await expect(insert(null, "EUR")).rejects.toMatchObject({ code: "23514" });
+    expect((await insert("12.50", "EUR")).rows[0]).toMatchObject({ price: "12.50", currency: "EUR" });
+    expect((await insert(null, null)).rows[0]).toMatchObject({ price: null, currency: null });
+  });
 });
 
 test("kita paskyra negali vykdyti žinomo įrašo keitimo ar trynimo veiksmo", async ({ browser }) => {

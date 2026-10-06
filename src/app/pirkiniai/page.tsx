@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PurchaseShell } from "@/components/purchase-shell";
 import { displayDate, displayPrice } from "@/lib/purchase-format";
 import { listHref, listParams, listPurchases } from "@/lib/purchases";
@@ -8,7 +9,11 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const search = await searchParams;
   const single = (key: string) => typeof search[key] === "string" ? search[key] as string : undefined;
   const params = listParams({ q: single("q"), sort: single("sort"), page: single("page") });
-  const { rows, hasNext } = await listPurchases(params);
+  const { rows, hasNext, redirectPage } = await listPurchases(params);
+  if (redirectPage !== null) {
+    const target = listHref({ ...params, page: redirectPage });
+    redirect(single("busena") === "istrinta" ? `${target}${target.includes("?") ? "&" : "?"}busena=istrinta` : target);
+  }
   const context = new URLSearchParams();
   if (params.q) context.set("q", params.q);
   if (params.sort !== "newest") context.set("sort", params.sort);
