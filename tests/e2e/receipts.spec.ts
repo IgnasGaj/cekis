@@ -652,6 +652,7 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
+  await page.reload();
   await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible();
   const variants = [
     { name: "keli-produktai", lines: ["PREKYBOS CENTRAS", "Pienas 2,30 EUR", "Duona 1,40 EUR", "Is viso 3,70 EUR", "Data 2026-10-05"] },
@@ -679,6 +680,8 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
       confirmedName = "Kelių prekių čekis, pasirinkta rankiniu būdu";
       await page.getByLabel("Prekės pavadinimas").fill(confirmedName);
       await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
+      await page.reload();
       await expect(page.getByRole("heading", { name: confirmedName })).toBeVisible();
     }
     if (variant.name === "nepalaikoma-valiuta") await expect(page.getByText("Čekio suma").locator("..")).not.toContainText("EUR");
