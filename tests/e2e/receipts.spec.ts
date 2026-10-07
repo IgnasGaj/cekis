@@ -110,7 +110,7 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   await pageA.goto(`/pirkiniai/${first}`);
   await pageA.locator(".receipt-item").filter({ hasText: shared.filename }).getByRole("button", { name: "Ištrinti čekį visur" }).click();
   await expect(pageA.getByText("Čekis bus pašalintas iš 2 pirkinių")).toBeVisible();
-  await pageA.getByRole("button", { name: "Atšaukti" }).click();
+  await pageA.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await pageA.getByRole("button", { name: "Ištrinti pirkinį" }).click();
   await pageA.getByRole("button", { name: "Ištrinti", exact: true }).click();
   await pageA.goto(`/pirkiniai/${second}`);
@@ -156,7 +156,7 @@ test("pavėluotas atšaukimas ir failo keitimas išsaugo bendrą čekį", async 
   const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
   await replacement.setFiles({ name: "kitas.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Ankstesnis čekis jau pridėtas ir liko prie pirkinio.")).toBeVisible();
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   const cancel = () => page.request.post("/api/receipts/cancel", { headers: { Origin: process.env.APP_URL! }, data: { key: row.submission_key } });
   expect((await (await cancel()).json()).completed).toBe(true);
   const blocker = new Client({ connectionString: process.env.DATABASE_URL }); await blocker.connect();
@@ -245,7 +245,7 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
   });
   await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
   await expect(page.getByText("Atsakymas nutrūko.")).toBeVisible();
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
   const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
   await again.setFiles({ name: "pakeistas.png", mimeType: "image/png", buffer: png });
@@ -268,7 +268,7 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
   await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
   await expect(page.getByText(/Saugykla laikinai nepasiekiama/)).toBeVisible();
   await expect(page.getByLabel("Pardavėjas")).toBeDisabled();
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText("Pirkinys išsaugotas be čekio.")).toBeVisible();
   const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
   await replacement.setFiles({ name: "naujas.png", mimeType: "image/png", buffer: png });
@@ -340,7 +340,7 @@ test("garantijos valdikliai užrakinami per kūrimą, o atšaukimas nepakeičia 
   await expect(page.getByLabel("Kaip nurodysi pabaigą?")).toBeDisabled();
   await expect(page.getByLabel("Garantijos pabaigos data")).toBeDisabled();
   await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeDisabled();
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
   secondRelease();
   await choose();
@@ -376,7 +376,7 @@ test("pridėjimo formos pavėluotas atšaukimas palieka jau pridėtą čekį", a
   await expect(page.getByText(/Atsakymas nutrūko/)).toBeVisible();
   await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
   const row = await db(async (client) => (await client.query("SELECT r.id,r.object_key FROM receipt r JOIN \"user\" u ON u.id=r.owner_id WHERE u.email=$1", [email])).rows[0]);
-  await page.getByRole("button", { name: "Atšaukti" }).click();
+  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText("Čekis jau pridėtas ir liko prie pirkinio.")).toBeVisible();
   await db(async (client) => {
     expect((await client.query("SELECT state FROM receipt WHERE id=$1", [row.id])).rows[0].state).toBe("ready");
@@ -649,6 +649,7 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   await expect(page.getByText("Šio PDF automatinis nuskaitymas neprieinamas.", { exact: false })).toBeVisible();
   await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
   await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible();
   const variants = [
     { name: "keli-produktai", lines: ["PREKYBOS CENTRAS", "Pienas 2,30 EUR", "Duona 1,40 EUR", "Is viso 3,70 EUR", "Data 2026-10-05"] },

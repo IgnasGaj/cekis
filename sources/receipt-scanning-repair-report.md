@@ -29,3 +29,5 @@ Receipt numbers are editable in new-purchase review and validated/persisted thro
 Only merge the repair after exact-commit CI passes, including the new authenticated scanning cases. Continue to show user review and honest failure/manual fallback; do not claim every receipt is perfectly recognised.
 
 Automatic approval review rejected a proposed tree containing the owner’s real receipt photo and derived purchase data. The published repair excludes those items and uses fictional generated receipt data for committed regression tests. Real-photo testing evidence remains local.
+
+Initial repair CI: 41 browser cases passed (including both new scanning cases); the existing shared-receipt cancellation case failed because its broad Cancel selector matched the new OCR Cancel action. It now targets the exact upload Cancel button. An existing PDF review navigation assertion passed on retry; it now waits explicitly for the completed navigation before checking the heading. All preceding CI checks passed. The corrected exact-commit run is the merge gate.
