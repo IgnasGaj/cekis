@@ -38,6 +38,23 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
   const savingRef = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; active.current?.controller.abort(); stopOcrWorker(active.current?.worker ?? null); active.current = null; }; }, []);
+  useEffect(() => {
+    const key = `receipt-scan:${receiptId}`;
+    try {
+      const cached = sessionStorage.getItem(key);
+      if (!cached) return;
+      sessionStorage.removeItem(key);
+      const parsed: ReceiptSuggestions = JSON.parse(cached);
+      const names = ["seller", "purchaseDate", "receiptTotal", "receiptCurrency", "receiptNumber", "productName", "productPrice"] as const;
+      if (names.every((name) => typeof parsed[name]?.value === "string" && ["strong", "uncertain", "absent"].includes(parsed[name]?.state))) {
+        queueMicrotask(() => {
+          if (!mounted.current) return;
+          setSuggestions(parsed);
+          setState(names.some((name) => parsed[name].value) ? "ready" : "empty");
+        });
+      }
+    } catch { /* A stale browser cache never blocks a fresh scan. */ }
+  }, [receiptId]);
   const cancel = () => {
     const attempt = active.current;
     if (!attempt) return;
@@ -66,8 +83,8 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     }
   };
   const setField = (key: keyof PurchaseFields, value: string) => { setValues((prior) => ({ ...prior, [key]: value })); setErrors((prior) => ({ ...prior, [key]: undefined, form: undefined })); };
-  const hint = (key: "productName" | "seller" | "purchaseDate" | "receiptNumber") => {
-    const suggestion = suggestions?.[key];
+  const hint = (key: "productName" | "seller" | "purchaseDate" | "receiptNumber" | "price") => {
+    const suggestion = key === "price" ? suggestions?.productPrice : suggestions?.[key];
     if (!suggestion || suggestion.state === "absent") return null;
     if (!suggestion.value) return <p className="ocr-uncertain">Rasti keli galimi variantai. Patikrink čekį ir įvesk pats.</p>;
     return <div className="ocr-suggestion"><span>{suggestion.state === "uncertain" ? "Patikrink šį lauką: " : "Siūloma: "}<strong>{suggestion.value}</strong></span>
@@ -78,7 +95,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     <input id={`review-${key}`} type={key === "purchaseDate" ? "date" : "text"} value={values[key]} onChange={(event) => setField(key, event.target.value)}
       max={key === "purchaseDate" ? maxDate : undefined} maxLength={key === "productName" || key === "seller" ? 200 : 20}
       inputMode={key === "price" ? "decimal" : undefined} aria-invalid={Boolean(errors[key])} />
-    {key !== "price" && hint(key)}{errors[key] && <p className="form-error">{errors[key]}</p>}
+    {hint(key)}{errors[key] && <p className="form-error">{errors[key]}</p>}
   </div>;
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (savingRef.current) return;

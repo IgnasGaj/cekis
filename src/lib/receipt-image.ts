@@ -1,6 +1,6 @@
 // Prepare a derived OCR image; the original File is always retained for upload.
-export async function prepareReceiptImage(file: Blob): Promise<ArrayBuffer> {
-  const image = await createImageBitmap(file);
+export async function prepareReceiptImage(file: Blob, variant: "primary" | "fallback" = "primary"): Promise<ArrayBuffer> {
+  const image = await createImageBitmap(file).catch(() => { throw new Error("Nuotraukos atverti nepavyko. Pasirink JPEG arba PNG, arba įvesk duomenis rankiniu būdu."); });
   try {
     if (image.width > 6000 || image.height > 6000 || image.width * image.height > 16000000) throw new Error("Nuotrauka viršija 6000 px / 16 mln. taškų ribą.");
     const sample = document.createElement("canvas");
@@ -32,8 +32,9 @@ export async function prepareReceiptImage(file: Blob): Promise<ArrayBuffer> {
     }
     let x = 0, y = 0, width = image.width, height = image.height;
     const boxArea = (best.right - best.left + 1) * (best.bottom - best.top + 1);
-    if (best.count > mask.length * 0.18 && best.count / boxArea > 0.55 && boxArea < mask.length * 0.9) {
-      const pad = -Math.ceil(3 / scale);
+    if (variant === "primary" && best.count > mask.length * 0.18 && best.count / boxArea > 0.55 && boxArea < mask.length * 0.9) {
+      // Keep a margin outside the detected paper: text may reach its edge.
+      const pad = Math.ceil(8 / scale);
       x = Math.max(0, Math.floor(best.left / scale) - pad); y = Math.max(0, Math.floor(best.top / scale) - pad);
       width = Math.min(image.width - x, Math.ceil((best.right + 1) / scale) + pad - x);
       height = Math.min(image.height - y, Math.ceil((best.bottom + 1) / scale) + pad - y);
@@ -45,13 +46,15 @@ export async function prepareReceiptImage(file: Blob): Promise<ArrayBuffer> {
     if (!target) throw new Error("Vaizdo apdorojimas neprieinamas.");
     target.fillStyle = "white"; target.fillRect(0, 0, output.width, output.height);
     target.drawImage(image, x, y, width, height, 0, 0, output.width, output.height);
-    const data = target.getImageData(0, 0, output.width, output.height);
-    // Increase faded thermal-print contrast without destructive hard thresholding.
-    for (let i = 0; i < data.data.length; i += 4) {
-      const gray = (data.data[i] * 0.299 + data.data[i + 1] * 0.587 + data.data[i + 2] * 0.114 - 105) * 1.8;
-      data.data[i] = data.data[i + 1] = data.data[i + 2] = Math.max(0, Math.min(255, gray));
+    if (variant === "primary") {
+      const data = target.getImageData(0, 0, output.width, output.height);
+      // Increase faded thermal-print contrast without destructive hard thresholding.
+      for (let i = 0; i < data.data.length; i += 4) {
+        const gray = (data.data[i] * 0.299 + data.data[i + 1] * 0.587 + data.data[i + 2] * 0.114 - 105) * 1.8;
+        data.data[i] = data.data[i + 1] = data.data[i + 2] = Math.max(0, Math.min(255, gray));
+      }
+      target.putImageData(data, 0, 0);
     }
-    target.putImageData(data, 0, 0);
     const blob = await new Promise<Blob>((resolve, reject) => output.toBlob((value) => value ? resolve(value) : reject(new Error("Vaizdo apdoroti nepavyko.")), "image/png"));
     return blob.arrayBuffer();
   } finally { image.close(); }

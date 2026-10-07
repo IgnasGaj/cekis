@@ -4,7 +4,7 @@
 
 - `AddReceiptFlow` never invoked OCR. It required manual fields before creating a purchase and uploading the receipt; its copy explicitly said automatic scanning was unavailable.
 - Saved-purchase review was the only OCR entry point and required a separate button press.
-- The parser excluded Avitelos as a seller because `tel` matched inside its name, did not accept tax letters after item prices, did not join wrapped model/description lines, and did not recognise `Mokėti` / rounded payable totals.
+- The parser excluded a legitimate seller name because `tel` matched inside a word, did not accept tax letters after item prices, did not join wrapped model/description lines, and did not recognise `Mokėti` / rounded payable totals.
 - Recognition ran on the entire unprepared photograph. Cloth/background texture polluted segmentation. Earlier OCR browser coverage primarily used generated text images, not this real thermal receipt.
 
 ## Changes
@@ -31,3 +31,9 @@ Only merge the repair after exact-commit CI passes, including the new authentica
 Automatic approval review rejected a proposed tree containing the owner’s real receipt photo and derived purchase data. The published repair excludes those items and uses fictional generated receipt data for committed regression tests. Real-photo testing evidence remains local.
 
 Initial repair CI: 41 browser cases passed (including both new scanning cases); the existing shared-receipt cancellation case failed because its broad Cancel selector matched the new OCR Cancel action. It now targets the exact upload Cancel button. An existing PDF review navigation assertion passed on retry; it now waits explicitly for the completed navigation before checking the heading. All preceding CI checks passed. The corrected exact-commit run is the merge gate.
+
+## Follow-up audit
+
+The corrected checkpoint `5aec162d3be38570fac80863e6e5fc2c8a39671e` passed [CI](https://github.com/IgnasGaj/cekis/actions/runs/37654221296). A remaining existing-purchase gap was found: after automatic scanning, upload discarded the suggestions and review required another scan. The upload now keeps the finished suggestions in tab-local temporary storage keyed to the saved receipt, exposes a direct review link, and the review form offers the item-price suggestion while preserving confirmed purchase fields. If storage is unavailable, normal rescanning remains possible. A detected paper crop now includes an outward margin to avoid trimming edge text. Weak first-pass results get at most one sequential OCR pass on a resized image without cropping or contrast adjustment; stronger results do not incur another pass. These changes require the final commit's CI result before merge.
+
+Local disposable PostgreSQL/private object storage browser checks covered existing-purchase scan → upload → review → explicit item-price and currency confirmation → save → reload, plus original-byte checks and owner separation. The new-purchase photo-style scan → editable suggestions → save → reload and original-byte equality also passed. Lint, typecheck and focused parser checks passed after the follow-up. The image fixture was generated for tests and contains no owner receipt data. The owner's real receipt image was not found in the current attachments or workspace, so its prior local recognition result could not be repeated after the crop-margin change. No physical iPhone or Android capture test was available.

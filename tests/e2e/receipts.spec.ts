@@ -68,6 +68,7 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   for (const [name, mime, bytes] of [["pirmas.png", "image/png", png], ["antras.jpg", "image/jpeg", jpeg], ["trecias.pdf", "application/pdf", pdf]] as const) {
     const [chooser] = await Promise.all([pageA.waitForEvent("filechooser"), pageA.getByRole("button", { name: name.endsWith(".pdf") ? /Įkelti PDF Pasirinkti/ : /Įkelti nuotrauką Pasirinkti/ }).click()]);
     await chooser.setFiles({ name, mimeType: mime, buffer: bytes });
+    if (mime !== "application/pdf") await pageA.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
     await pageA.getByRole("button", { name: "Įkelti čekį" }).click();
     uploaded++;
     await expect(pageA.getByRole("link", { name: "Atsisiųsti originalą" })).toHaveCount(uploaded);
@@ -583,6 +584,7 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "sintetinis-cekis.png", mimeType: "image/png", buffer: png });
+  await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
   await page.getByRole("button", { name: "Įkelti čekį" }).click();
   await expect(page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" })).toBeVisible();
   const receiptId = await db(async (client) => (await client.query("SELECT id FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [purchaseId])).rows[0].id as string);
@@ -797,6 +799,34 @@ async function anonymousReceiptPhoto() {
   const image = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1500"><defs><pattern id="texture" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="#70644d"/><path d="M0 8h24M8 0v24" stroke="#ae9974" stroke-width="3"/></pattern></defs><rect width="100%" height="100%" fill="url(#texture)"/><rect x="170" y="100" width="660" height="1290" fill="#eeeeeb"/><g font-family="DejaVu Sans" font-size="28" fill="#333333">${lines.map((line, index) => `<text x="205" y="${200 + index * 92}">${line}</text>`).join("")}</g></svg>`;
   return sharp(Buffer.from(image)).jpeg({ quality: 90 }).toBuffer();
 }
+
+test("prie esamo pirkinio pridėto čekio nuskaitymo pasiūlymai išlieka peržiūroje", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `existing-ocr-${randomUUID()}@example.test`);
+  const purchaseId = await createPurchase(page, "Patvirtintas pirkinys");
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await page.getByRole("button", { name: "Įkelti čekį" }).click();
+  await page.getByRole("link", { name: "Peržiūrėti nuskaitytus duomenis" }).click();
+  await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
+  await expect(page.getByText("Nuskaityta. Peržiūrėk pasiūlymus.")).toBeVisible();
+  await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("Patvirtintas pirkinys");
+  await expect(page.getByText("UAB Bandymų prekyba")).toBeVisible();
+  const price = page.getByLabel("Prekės kaina (neprivaloma)");
+  await expect(price).toHaveValue("");
+  await price.locator("..").getByRole("button", { name: "Pritaikyti pasiūlymą" }).click();
+  await expect(price).toHaveValue("19.99");
+  await expect(page.getByText("20.00")).toBeVisible();
+  await page.getByLabel("Prekės kainos valiuta").selectOption("EUR");
+  await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("Patvirtintas pirkinys, pataisytas");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Patvirtintas pirkinys, pataisytas" })).toBeVisible();
+  expect(await db(async (client) => (await client.query("SELECT price FROM purchase WHERE id=$1", [purchaseId])).rows[0].price)).toBe("19.99");
+});
 
 test("naujas čekis nuskaitomas prieš sukuriant pirkinį ir išsaugomas originalas", async ({ page }) => {
   test.setTimeout(120000);

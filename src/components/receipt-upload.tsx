@@ -71,22 +71,31 @@ export function ExistingPurchaseUploader({ purchaseId }: { purchaseId: string })
   const [suggestions, setSuggestions] = useState<ReceiptSuggestions | null>(null);
   const scan = useReceiptScan(todayInVilnius(), setSuggestions);
   const [key, setKey] = useState(newSubmissionKey); const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
-  const choose = async (next: File) => { const selected = ++selection.current; scan.cancel(); setSuggestions(null); if (!next.size || next.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; } let completed = false; if (file) { try { completed = (await cancelReceipt(key)).completed; } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } if (selected !== selection.current) return; setFile(next); if (next.type.startsWith("image/")) void scan.scan(next); setKey(newSubmissionKey()); setMessage(completed ? "Ankstesnis čekis jau pridėtas ir liko prie pirkinio." : ""); if (completed) router.refresh(); };
+  const [message, setMessage] = useState(""); const [uploadedId, setUploadedId] = useState<string | null>(null);
+  const controller = useRef<AbortController | null>(null); const uploading = useRef(false);
+  const choose = async (next: File) => { if (uploading.current) return; const selected = ++selection.current; scan.cancel(); setSuggestions(null); setUploadedId(null); if (!next.size || next.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; } let completed = false; if (file) { try { completed = (await cancelReceipt(key)).completed; } catch { setMessage("Ankstesnio įkėlimo atšaukti nepavyko. Bandyk dar kartą."); return; } } if (selected !== selection.current) return; setFile(next); if (next.type === "image/jpeg" || next.type === "image/png") void scan.scan(next); setKey(newSubmissionKey()); setMessage(completed ? "Ankstesnis čekis jau pridėtas ir liko prie pirkinio." : ""); if (completed) router.refresh(); };
   const upload = async () => {
-    if (!file) return;
+    if (!file || uploading.current || scan.state === "loading") return;
     if (!file.size || file.size > limit) { setMessage("Failas turi būti nuo 1 baito iki 10 MiB."); return; }
-    scan.cancel(); const abort = new AbortController(); controller.current = abort; setBusy(true); setMessage("Įkeliama…");
-    try { await sendReceipt(file,purchaseId,key,abort.signal); setMessage("Čekis pridėtas"); setFile(null); setKey(newSubmissionKey()); router.refresh(); }
+    uploading.current = true; const abort = new AbortController(); controller.current = abort; setBusy(true); setMessage("Įkeliama…");
+    try { const saved = await sendReceipt(file,purchaseId,key,abort.signal);
+      if (abort.signal.aborted) return;
+      if (suggestions) {
+        try { sessionStorage.setItem(`receipt-scan:${saved.id}`, JSON.stringify(suggestions)); }
+        catch { /* Storage may be disabled; the saved receipt can still be rescanned. */ }
+      }
+      setUploadedId(saved.id); setMessage("Čekis pridėtas. Peržiūrėk pasiūlymus prieš keisdamas pirkinio duomenis.");
+      setFile(null); setKey(newSubmissionKey()); router.refresh(); }
     catch (error) { if (!abort.signal.aborted) setMessage(error instanceof Error ? error.message : "Įkelti nepavyko. Bandyk dar kartą."); }
-    finally { setBusy(false); controller.current = null; }
+    finally { uploading.current = false; setBusy(false); controller.current = null; }
   };
   const cancel = async () => { selection.current++; scan.cancel(); controller.current?.abort(); setBusy(false);
     try { const result = await cancelReceipt(key); setFile(null); setKey(newSubmissionKey()); setMessage(result.completed ? "Čekis jau pridėtas ir liko prie pirkinio." : "Įkėlimas atšauktas."); router.refresh(); }
     catch { setMessage("Atšaukti nepavyko. Bandyk dar kartą."); }
   };
   return <section className="receipt-upload"><h3>Pridėti čekį</h3><FileChoices onFile={choose} disabled={busy} />
-    {file && <><Preview file={file} url={url} />{file.type.startsWith("image/") && <><ReceiptScanControls scan={scan} retry={() => { if (!busy) void scan.scan(file); }} />{suggestions && <p className="small-note">{[suggestions.seller.value, suggestions.productName.value, suggestions.purchaseDate.value, suggestions.productPrice.value].filter(Boolean).join(" · ")} · Duomenis pritaikyk per čekio peržiūrą po įkėlimo.</p>}</>}<button className="primary-button" disabled={busy} type="button" onClick={upload}>{busy ? "Įkeliama…" : "Įkelti čekį"}</button><button className="secondary-button" type="button" onClick={cancel}>Atšaukti</button></>}
+    {file && <><Preview file={file} url={url} />{(file.type === "image/jpeg" || file.type === "image/png") && <><ReceiptScanControls scan={scan} retry={() => { if (!busy) void scan.scan(file); }} />{suggestions && <p className="small-note">{[suggestions.seller.value, suggestions.productName.value, suggestions.purchaseDate.value, suggestions.productPrice.value].filter(Boolean).join(" · ")} · Duomenis pritaikyk per čekio peržiūrą po įkėlimo.</p>}</>}<button className="primary-button" disabled={busy || scan.state === "loading"} type="button" onClick={upload}>{busy ? "Įkeliama…" : "Įkelti čekį"}</button><button className="secondary-button" type="button" onClick={cancel}>Atšaukti</button></>}
+    {uploadedId && <Link href={`/pirkiniai/${purchaseId}/cekis/${uploadedId}`}>Peržiūrėti nuskaitytus duomenis</Link>}
     {message && <p role="status" aria-live="polite" className={message.includes("nepavyko") ? "form-error" : "notice"}>{message}</p>}
   </section>;
 }
