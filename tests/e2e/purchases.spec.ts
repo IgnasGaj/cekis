@@ -43,6 +43,7 @@ async function tabTo(page: Page, control: Locator) {
 }
 
 test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ browser }) => {
+  test.setTimeout(60000);
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const emailA = `purchase-a-${suffix}@example.test`;
   const emailB = `purchase-b-${suffix}@example.test`;

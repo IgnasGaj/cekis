@@ -31,12 +31,16 @@ export async function sendReminderMail(to: string, message: ReturnType<typeof re
 }
 
 export function classifyMailError(error: unknown): "transient" | "permanent" | "uncertain" {
-  const value = error as { responseCode?: number; reminderClass?: string } | null;
+  const value = error as { responseCode?: number; reminderClass?: string; code?: string; command?: string; syscall?: string } | null;
   if (value?.reminderClass === "configuration" || value?.reminderClass === "recipient") return "permanent";
   if (typeof value?.responseCode === "number") {
     if (value.responseCode >= 400 && value.responseCode < 500) return "transient";
     if (value.responseCode >= 500 && value.responseCode < 600) return "permanent";
   }
+  if (["EAUTH","ENOAUTH","ECONFIG"].includes(value?.code ?? "")) return "permanent";
+  // Nodemailer 10 preserves Node's syscall=connect on a refused TCP connection.
+  // Its command=CONN alone is insufficient: later socket errors can also use it.
+  if (value?.code === "ESOCKET" && value.command === "CONN" && value.syscall === "connect") return "transient";
   // A connection loss or timeout may occur after SMTP accepted DATA.
   return "uncertain";
 }

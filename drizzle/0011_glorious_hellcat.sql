@@ -1,0 +1,2 @@
+ALTER TABLE "purchase" DROP CONSTRAINT "purchase_reminder_check";--> statement-breakpoint
+ALTER TABLE "purchase" ADD CONSTRAINT "purchase_reminder_check" CHECK (("purchase"."reminder_mode" in ('inherit','off') and "purchase"."reminder_offset" is null) or ("purchase"."reminder_mode" = 'custom' and "purchase"."reminder_offset" is not null and "purchase"."reminder_offset" in (7,30,90)));

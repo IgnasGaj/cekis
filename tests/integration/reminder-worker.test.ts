@@ -2,6 +2,7 @@ import { afterAll,afterEach,beforeAll,describe,expect,it } from "vitest";
 import { config } from "dotenv";
 import { Client,Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 
@@ -65,7 +66,7 @@ describe("durable reminder worker",()=>{
       reminder_mode,reminder_offset) VALUES($1,$2,$3,'Kitas pirkinys','Parduotuvė','2028-06-01','known','2028-07-10','date','custom',7)`,
       [customId,inherited.owner,randomUUID()]);
     await reconcile(inherited.owner,customId);
-    expect((await service.saveReminderSettings(inherited.owner,true,90,1))).toBe("saved");
+    expect((await service.saveReminderSettings(inherited.owner,true,90,1))).toEqual({result:"saved",revision:2});
     const before=(await pool.query("SELECT offset_days,status FROM warranty_reminder WHERE purchase_id=$1",[customId])).rows;
     expect(before).toMatchObject([{offset_days:7,status:"pending"}]);
     expect(await service.reconcileDirtyPurchases(10,now)).toBe(2);
@@ -80,27 +81,55 @@ describe("durable reminder worker",()=>{
       service.saveReminderSettings(item.owner,true,90,1),
       service.saveReminderSettings(item.owner,false,7,1),
     ]);
-    expect(results.sort()).toEqual(["conflict","saved"]);
+    expect(results).toContain("conflict");
+    expect(results).toContainEqual({result:"saved",revision:2});
     const revision=(await pool.query("SELECT revision FROM reminder_preference WHERE user_id=$1",[item.owner])).rows[0].revision;
     expect(revision).toBe(2);
   });
+  it("returns the committed settings revision despite a later account save",async()=>{
+    const item=await purchase(), foreign=await purchase();
+    const first=await service.saveReminderSettings(item.owner,false,30,1);
+    expect(first).toEqual({result:"saved",revision:2});
+    if (typeof first === "string") throw new Error("Expected saved settings");
+    expect(await service.saveReminderSettings(item.owner,true,90,2)).toEqual({result:"saved",revision:3});
+    expect(await service.saveReminderSettings(item.owner,false,7,first.revision)).toBe("conflict");
+    expect((await pool.query("SELECT enabled,default_offset,revision FROM reminder_preference WHERE user_id=$1",[item.owner])).rows[0])
+      .toMatchObject({enabled:true,default_offset:90,revision:3});
+    expect((await pool.query("SELECT enabled,default_offset,revision FROM reminder_preference WHERE user_id=$1",[foreign.owner])).rows[0])
+      .toMatchObject({enabled:true,default_offset:30,revision:1});
+  });
+  it("returns the committed purchase revision despite later reminder and unrelated edits",async()=>{
+    const item=await purchase(), foreign=await purchase();
+    const first=await service.savePurchaseReminder(item.owner,item.id,"off",null,1);
+    expect(first).toEqual({result:"saved",revision:2});
+    if (typeof first === "string") throw new Error("Expected saved purchase reminder");
+    expect(await service.savePurchaseReminder(item.owner,item.id,"custom",90,2)).toEqual({result:"saved",revision:3});
+    expect(await service.savePurchaseReminder(item.owner,item.id,"inherit",null,first.revision)).toBe("conflict");
+    await pool.query("UPDATE purchase SET notes='Kitas redagavimas',revision=revision+1 WHERE id=$1 AND owner_id=$2",[item.id,item.owner]);
+    expect(await service.savePurchaseReminder(item.owner,item.id,"off",null,3)).toBe("conflict");
+    expect(await service.savePurchaseReminder(foreign.owner,item.id,"off",null,4)).toBe("missing");
+    expect((await pool.query("SELECT reminder_mode,reminder_offset,revision FROM purchase WHERE id=$1",[item.id])).rows[0])
+      .toMatchObject({reminder_mode:"custom",reminder_offset:90,revision:4});
+    expect((await pool.query("SELECT reminder_mode,reminder_offset,revision FROM purchase WHERE id=$1",[foreign.id])).rows[0])
+      .toMatchObject({reminder_mode:"inherit",reminder_offset:null,revision:1});
+  });
   it("reconciles inheritance, stable accepted identities, and owner-scoped revisions",async()=>{
     const item=await purchase();
-    expect((await service.saveReminderSettings(item.owner,true,90,1))).toBe("saved");
+    expect((await service.saveReminderSettings(item.owner,true,90,1))).toEqual({result:"saved",revision:2});
     expect((await service.saveReminderSettings(item.owner,true,7,1))).toBe("conflict");
     expect((await service.savePurchaseReminder("forged-owner",item.id,"off",null,1))).toBe("missing");
     expect((await service.savePurchaseReminder(item.owner,item.id,"custom",60 as never,1))).toBe("invalid");
     const current=(await pool.query<{revision:number}>("SELECT revision FROM purchase WHERE id=$1",[item.id])).rows[0].revision;
-    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,current))).toBe("saved");
+    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,current))).toEqual({result:"saved",revision:current+1});
     const rows=await pool.query<{offset_days:number;status:string}>("SELECT offset_days,status FROM warranty_reminder WHERE purchase_id=$1 ORDER BY offset_days",[item.id]);
     expect(rows.rows).toMatchObject([{offset_days:7,status:"pending"},{offset_days:30,status:"cancelled"}]);
     const customDue=new Date("2028-07-03T10:00:00Z");
     expect((await worker.runReminderWorker({now:customDue,send:async()=>"<accepted@test>"})).accepted).toBe(1);
     const revision=(await pool.query<{revision:number}>("SELECT revision FROM purchase WHERE id=$1",[item.id])).rows[0].revision;
-    expect((await service.savePurchaseReminder(item.owner,item.id,"off",null,revision))).toBe("saved");
-    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,revision+1))).toBe("saved");
-    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",30,revision+2))).toBe("saved");
-    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,revision+3))).toBe("saved");
+    expect((await service.savePurchaseReminder(item.owner,item.id,"off",null,revision))).toEqual({result:"saved",revision:revision+1});
+    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,revision+1))).toEqual({result:"saved",revision:revision+2});
+    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",30,revision+2))).toEqual({result:"saved",revision:revision+3});
+    expect((await service.savePurchaseReminder(item.owner,item.id,"custom",7,revision+3))).toEqual({result:"saved",revision:revision+4});
     expect((await worker.runReminderWorker({now:customDue,send:async()=>{throw new Error("duplicate");}})).claimed).toBe(0);
     await pool.query("UPDATE purchase SET warranty_end_date='2028-07-11' WHERE id=$1",[item.id]);
     await reconcile(item.owner,item.id);
@@ -195,6 +224,10 @@ describe("durable reminder worker",()=>{
     expect(await row(expiring.id)).toMatchObject({status:"cancelled",attempts:1});
   });
   it("keeps permanent rejection and ambiguous timeout terminal",async()=>{
+    const mail=await import("../../src/lib/reminder-mail");
+    expect(mail.classifyMailError(Object.assign(new Error("lost after DATA"),{code:"ESOCKET",command:"CONN"}))).toBe("uncertain");
+    expect(mail.classifyMailError(Object.assign(new Error("timeout after DATA"),{code:"ETIMEDOUT",command:"CONN"}))).toBe("uncertain");
+    expect(mail.classifyMailError(Object.assign(new Error("invalid credentials"),{code:"EAUTH"}))).toBe("permanent");
     const permanent=await purchase();
     expect((await worker.runReminderWorker({now,send:async()=>{throw Object.assign(new Error("rejected"),{responseCode:550});}})).failed).toBe(1);
     expect(await row(permanent.id)).toMatchObject({status:"failed",attempts:1});
@@ -243,5 +276,91 @@ describe("durable reminder worker",()=>{
     expect(await row(item.id)).toMatchObject({status:"uncertain",attempts:1});
     await worker.runReminderWorker({now,send:async()=>{sends++;return "<duplicate@test>";}});
     expect(sends).toBe(1);
+  });
+  it.each([
+    ["summer", "2028-06-10T17:59:59Z", "2028-06-10T18:00:01Z", "2028-06-11T06:00:00Z", "2028-07-10"],
+    ["winter", "2028-12-10T18:59:59Z", "2028-12-10T19:00:01Z", "2028-12-11T07:00:00Z", "2029-01-09"],
+  ])("defers before and after authorization at the %s closing boundary",async(_season,open,closed,nextMorning,endDate)=>{
+    for (const phase of ["beforeAuthorize","beforeSend"] as const) {
+      const item=await purchase(endDate);
+      let current=new Date(open), sends=0;
+      const advance=async()=>{current=new Date(closed);};
+      const counts=await worker.runReminderWorker({clock:()=>current,send:async()=>{sends++;return "<accepted@test>";},
+        [phase]:advance});
+      expect(counts.claimed).toBe(1);
+      expect(sends).toBe(0);
+      expect(await row(item.id)).toMatchObject({status:"pending",attempts:0,claim_token:null,dispatch_authorized_at:null});
+      current=new Date(nextMorning);
+      expect((await worker.runReminderWorker({clock:()=>current,send:async()=>{sends++;return "<accepted@test>";}})).accepted).toBe(1);
+      expect(sends).toBe(1);
+      expect(await row(item.id)).toMatchObject({status:"accepted",attempts:1});
+    }
+  });
+  it("stops a batch when the window closes after the first item",async()=>{
+    const first=await purchase(), second=await purchase();
+    let current=new Date("2028-06-10T17:59:59Z"), sends=0;
+    const send=async()=>{sends++;current=new Date("2028-06-10T18:00:01Z");return "<accepted@test>";};
+    expect((await worker.runReminderWorker({clock:()=>current,send})).claimed).toBe(1);
+    expect(sends).toBe(1);
+    expect([await row(first.id),await row(second.id)].map((value)=>value.status).sort()).toEqual(["accepted","pending"]);
+    current=new Date("2028-06-11T06:00:00Z");
+    expect((await worker.runReminderWorker({clock:()=>current,send:async()=>{sends++;return "<accepted@test>";}})).accepted).toBe(1);
+    expect(sends).toBe(2);
+  });
+  it("uses a fresh clock after reconciliation before claiming",async()=>{
+    await purchase();
+    let reads=0;
+    const open=new Date("2028-06-10T17:59:59Z"), closed=new Date("2028-06-10T18:00:01Z");
+    expect((await worker.runReminderWorker({clock:()=>++reads===1 ? open : closed,send:async()=>{throw new Error("outside window");}})).claimed).toBe(0);
+  });
+  it("defers when the window closes inside final authorization",async()=>{
+    const item=await purchase();
+    let reads=0;
+    const open=new Date("2028-06-10T17:59:59Z"), closed=new Date("2028-06-10T18:00:01Z");
+    const result=await worker.runReminderWorker({clock:()=>++reads>=5 ? closed : open,send:async()=>{throw new Error("outside window");}});
+    expect(result.claimed).toBe(1);
+    expect(await row(item.id)).toMatchObject({status:"pending",attempts:0,claim_token:null});
+  });
+  it("retries a real refused SMTP connection and captures one message after recovery",async()=>{
+    const item=await purchase();
+    const listener=createServer();
+    await new Promise<void>((resolve)=>listener.listen(0,"127.0.0.1",resolve));
+    const port=(listener.address() as {port:number}).port;
+    await new Promise<void>((resolve)=>listener.close(()=>resolve()));
+    const previousPort=process.env.SMTP_PORT;
+    process.env.SMTP_PORT=String(port);
+    const captured:string[]=[];
+    try {
+      expect((await worker.runReminderWorker({now})).retried).toBe(1);
+      expect(await row(item.id)).toMatchObject({status:"pending",attempts:1});
+      listener.on("connection",(socket)=>{
+        socket.setEncoding("utf8"); socket.write("220 local.test ESMTP\r\n");
+        let buffer="", data="", inData=false;
+        socket.on("data",(chunk:string)=>{
+          buffer+=chunk;
+          let boundary:number;
+          while ((boundary=buffer.indexOf("\r\n"))>=0) {
+            const line=buffer.slice(0,boundary); buffer=buffer.slice(boundary+2);
+            if (inData) {
+              if (line===".") { captured.push(data); data=""; inData=false;socket.write("250 2.0.0 queued\r\n"); }
+              else data+=`${line}\r\n`;
+            } else if (/^EHLO |^HELO /i.test(line)) socket.write("250 local.test\r\n");
+            else if (/^MAIL FROM:|^RCPT TO:/i.test(line)) socket.write("250 2.1.0 ok\r\n");
+            else if (line==="DATA") { inData=true;socket.write("354 send data\r\n"); }
+            else if (line==="QUIT") socket.end("221 bye\r\n");
+          }
+        });
+      });
+      await new Promise<void>((resolve)=>listener.listen(port,"127.0.0.1",resolve));
+      expect((await worker.runReminderWorker({now:new Date(now.getTime()+15*60_000)})).accepted).toBe(1);
+      expect(await row(item.id)).toMatchObject({status:"accepted",attempts:2});
+      expect(captured).toHaveLength(1);
+      expect(captured[0]).toContain(`${item.owner}@example.test`);
+      await worker.runReminderWorker({now:new Date(now.getTime()+30*60_000)});
+      expect(captured).toHaveLength(1);
+    } finally {
+      process.env.SMTP_PORT=previousPort;
+      if (listener.listening) await new Promise<void>((resolve)=>listener.close(()=>resolve()));
+    }
   });
 });

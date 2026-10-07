@@ -48,7 +48,7 @@ async function claim(now: Date, today: string): Promise<Work | null> {
   finally { client.release(); }
 }
 
-async function authorize(work: Work, now: Date): Promise<{ kind: "authorized"; email: string; productName: string; endDate: string } | { kind: "cancelled" | "failed" } | null> {
+async function authorize(work: Work, clock: () => Date): Promise<{ kind: "authorized"; email: string; productName: string; endDate: string } | { kind: "cancelled" | "failed" | "deferred" } | null> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -59,9 +59,14 @@ async function authorize(work: Work, now: Date): Promise<{ kind: "authorized"; e
       rp.enabled,rp.default_offset,rp.revision FROM "user" u JOIN reminder_preference rp ON rp.user_id=u.id
       WHERE u.id=$1 FOR SHARE OF u,rp`, [work.owner_id])).rows[0];
     const current = (await client.query(`SELECT status,claim_token,lease_until,attempts,identity FROM warranty_reminder WHERE id=$1 FOR UPDATE`,[work.id])).rows[0];
+    const now = clock();
     const desired = purchase && account ? desiredReminder(purchase,account,todayInVilnius(now)) : null;
-    if (!current || current.status !== "processing" || current.claim_token !== work.claim_token || current.lease_until <= now) {
+    if (!current || current.status !== "processing" || current.claim_token !== work.claim_token) {
       await client.query("ROLLBACK"); return null;
+    }
+    if (current.lease_until <= now) {
+      await client.query(`UPDATE warranty_reminder SET status='pending',claim_token=NULL,lease_until=NULL WHERE id=$1 AND claim_token=$2`,[work.id,work.claim_token]);
+      await client.query("COMMIT"); return { kind: "deferred" };
     }
     if (!desired || desired.identity !== work.identity || desired.dueDate > todayInVilnius(now) || !transportReady()) {
       const kind = !transportReady() && desired ? "failed" : "cancelled";
@@ -69,11 +74,25 @@ async function authorize(work: Work, now: Date): Promise<{ kind: "authorized"; e
         [work.id,kind,kind === "failed" ? "configuration" : null]);
       await client.query("COMMIT"); return { kind };
     }
-    await client.query(`UPDATE warranty_reminder SET dispatch_authorized_at=$2,attempts=attempts+1 WHERE id=$1`,[work.id,now]);
+    // The row is still provably unsent here. Closing the window does not use an SMTP attempt.
+    const dispatchTime = clock();
+    if (!insideSendWindow(dispatchTime) || dispatchTime >= work.lease_until) {
+      await client.query(`UPDATE warranty_reminder SET status='pending',claim_token=NULL,lease_until=NULL WHERE id=$1 AND claim_token=$2`,[work.id,work.claim_token]);
+      await client.query("COMMIT"); return { kind: "deferred" };
+    }
+    await client.query(`UPDATE warranty_reminder SET dispatch_authorized_at=$2,attempts=attempts+1 WHERE id=$1`,[work.id,dispatchTime]);
     await client.query("COMMIT");
     return { kind: "authorized", email: account.email, productName: purchase.product_name, endDate: desired.endDate };
   } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
   finally { client.release(); }
+}
+
+// Called only before transport starts. The token prevents a stale worker from requeuing another claim.
+async function requeueUnsent(work: Work): Promise<void> {
+  await pool.query(`UPDATE warranty_reminder SET status='pending',claim_token=NULL,lease_until=NULL,
+    attempts=attempts-1,dispatch_authorized_at=NULL,error_class=NULL
+    WHERE id=$1 AND claim_token=$2 AND status='processing' AND dispatch_authorized_at IS NOT NULL AND attempts > 0`,
+    [work.id,work.claim_token]);
 }
 
 async function finalize(work: Work, now: Date, result: { messageId: string } | { error: unknown }): Promise<"accepted" | "retried" | "failed" | "uncertain" | null> {
@@ -101,33 +120,46 @@ async function finalize(work: Work, now: Date, result: { messageId: string } | {
   finally { client.release(); }
 }
 
-export async function runReminderWorker(options: { now?: Date; send?: Sender; batchSize?: number;
+export async function runReminderWorker(options: { now?: Date; clock?: () => Date; send?: Sender; batchSize?: number;
   beforeAuthorize?: (purchaseId: string) => Promise<void>; beforeSend?: (purchaseId: string) => Promise<void> } = {}): Promise<WorkerCounts> {
-  if (process.env.NODE_ENV === "production" && (options.now || options.send || options.beforeAuthorize || options.beforeSend)) throw new Error("Test controls unavailable");
+  if (process.env.NODE_ENV === "production" && (options.now || options.clock || options.send || options.beforeAuthorize || options.beforeSend)) throw new Error("Test controls unavailable");
   const testClock = process.env.NODE_ENV !== "production" && process.env.CEKIS_TEST_WORKER === "true" && process.env.REMINDER_TEST_NOW
     ? new Date(process.env.REMINDER_TEST_NOW) : null;
-  const now = options.now ?? testClock ?? new Date();
+  const clock = options.clock ?? (() => options.now ?? testClock ?? new Date());
   const counts = emptyCounts();
   const deadline = Date.now() + 60_000;
-  await reconcileDirtyPurchases(50,now,deadline);
-  if (!insideSendWindow(now)) return counts;
+  await reconcileDirtyPurchases(50,clock(),deadline);
+  if (!insideSendWindow(clock())) return counts;
   const limit = Math.min(10,Math.max(1,options.batchSize ?? 10));
   for (let index=0; index<limit && Date.now()<deadline; index++) {
-    const work = await claim(now,todayInVilnius(now));
+    const claimTime = clock();
+    if (!insideSendWindow(claimTime)) break;
+    const work = await claim(claimTime,todayInVilnius(claimTime));
     if (!work) break;
     counts.claimed++;
     if (options.beforeAuthorize) await options.beforeAuthorize(work.purchase_id);
-    const authorized = await authorize(work,options.now ?? testClock ?? new Date());
+    const authorized = await authorize(work,clock);
     if (!authorized) continue;
+    if (authorized.kind === "deferred") break;
     if (authorized.kind !== "authorized") { counts[authorized.kind]++; continue; }
-    if ((options.now ?? testClock ?? new Date()).getTime() >= work.lease_until.getTime()) { counts.uncertain++; continue; }
     if (options.beforeSend) await options.beforeSend(work.purchase_id);
+    let message: ReturnType<typeof reminderMessage>;
+    try { message = reminderMessage(authorized.productName,authorized.endDate,todayInVilnius(clock()),work.purchase_id,getEnv().APP_URL); }
+    catch (error) {
+      const final = await finalize(work,clock(),{ error });
+      if (final) counts[final]++;
+      continue;
+    }
+    const dispatchTime = clock();
+    if (!insideSendWindow(dispatchTime) || dispatchTime >= work.lease_until) {
+      await requeueUnsent(work);
+      break;
+    }
     let outcome: { messageId: string } | { error: unknown };
     try {
-      const message = reminderMessage(authorized.productName,authorized.endDate,todayInVilnius(now),work.purchase_id,getEnv().APP_URL);
       outcome = { messageId: await (options.send ?? sendReminderMail)(authorized.email,message) };
     } catch (error) { outcome = { error }; }
-    const final = await finalize(work,options.now ?? testClock ?? new Date(),outcome);
+    const final = await finalize(work,clock(),outcome);
     if (final) counts[final]++;
   }
   return counts;

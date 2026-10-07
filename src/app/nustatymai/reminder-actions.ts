@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
-import { getReminderSettings, saveReminderSettings, type ReminderOffset } from "@/lib/reminders";
+import { saveReminderSettings, type ReminderOffset } from "@/lib/reminders";
 
 export type ReminderFormState = { message: string; error: boolean; revision?: number; enabled?: boolean; offset?: number };
 export async function saveSettingsAction(_state: ReminderFormState, form: FormData): Promise<ReminderFormState> {
@@ -13,9 +13,9 @@ export async function saveSettingsAction(_state: ReminderFormState, form: FormDa
     return { message: "Patikrink priminimų pasirinkimus.", error: true,enabled,offset };
   try {
     const result = await saveReminderSettings(user.id,enabled,offset as ReminderOffset,revision);
-    if (result !== "saved") return { message: result === "conflict" ? "Nustatymai pasikeitė kitur. Atnaujink puslapį ir peržiūrėk pasirinkimus." :
+    if (typeof result === "string") return { message: result === "conflict" ? "Nustatymai pasikeitė kitur. Atnaujink puslapį ir peržiūrėk pasirinkimus." :
       result === "unavailable" ? "Priminimai dabar negalimi. Patikrink patvirtintą el. paštą ir siuntimo konfigūraciją." : "Patikrink pasirinkimą.",error: true,enabled,offset };
     revalidatePath("/nustatymai");
-    return { message: "Priminimų nustatymai išsaugoti.",error: false,revision: (await getReminderSettings(user.id))?.revision,enabled,offset };
+    return { message: "Priminimų nustatymai išsaugoti.",error: false,revision: result.revision,enabled,offset };
   } catch { return { message: "Išsaugoti nepavyko. Bandyk dar kartą.",error: true,enabled,offset }; }
 }

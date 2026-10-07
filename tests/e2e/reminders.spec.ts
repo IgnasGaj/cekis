@@ -60,6 +60,23 @@ async function enable(page:Page) {
   await expect(page.getByText("Priminimų nustatymai išsaugoti.")).toBeVisible();
 }
 
+async function holdAction(page:Page,path:string) {
+  let release!:()=>void, completed!:()=>void, delivered!:()=>void;
+  const gate=new Promise<void>((resolve)=>{release=resolve;});
+  const serverCompleted=new Promise<void>((resolve)=>{completed=resolve;});
+  const responseDelivered=new Promise<void>((resolve)=>{delivered=resolve;});
+  const handler=async(route:import("@playwright/test").Route)=>{
+    if (route.request().method()!=="POST" || !route.request().headers()["next-action"]) { await route.continue(); return; }
+    const response=await route.fetch();
+    completed();
+    await gate;
+    await route.fulfill({response});
+    delivered();
+  };
+  await page.route(`**${path}`,handler);
+  return {serverCompleted,release:async()=>{release();await responseDelivered;await page.unroute(`**${path}`,handler);}};
+}
+
 test("patvirtintas gavėjas, išsaugotas priminimas ir tikras vietinis SMTP laiškas",async({browser})=>{
   const page=await browser.newPage({viewport:{width:390,height:844}});
   const email=`reminder-${randomUUID()}@example.test`;
@@ -173,4 +190,101 @@ test("pasenę nustatymai, pirkinio valdiklis ir kitos paskyros prieiga",async({b
   const unchanged=await db(async(client)=>(await client.query("SELECT reminder_mode,reminder_offset FROM purchase WHERE id=$1",[id])).rows[0]);
   expect(unchanged).toMatchObject({reminder_mode:"off",reminder_offset:null});
   await context.close(); await foreign.close();
+});
+
+test("atidėtas bendrų priminimų atsakas išlaiko tikslią reviziją ir užrakina valdiklius",async({browser})=>{
+  const context=await browser.newContext();
+  const first=await context.newPage(), second=await context.newPage();
+  await signIn(first,`settings-race-${randomUUID()}@example.test`);
+  await first.goto("/nustatymai");
+  await first.getByRole("checkbox",{name:"Įjungti garantijos priminimus el. paštu"}).check();
+  await first.getByLabel("Priminti prieš").selectOption("90");
+  const held=await holdAction(first,"/nustatymai");
+  await first.getByRole("button",{name:"Išsaugoti priminimus"}).click();
+  await held.serverCompleted;
+  await expect(first.getByRole("checkbox",{name:"Įjungti garantijos priminimus el. paštu"})).toBeDisabled();
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await expect(first.getByRole("button",{name:"Saugoma…"})).toBeDisabled();
+  await second.goto("/nustatymai");
+  await second.getByRole("checkbox",{name:"Įjungti garantijos priminimus el. paštu"}).uncheck();
+  await second.getByLabel("Priminti prieš").selectOption("7");
+  await second.getByRole("button",{name:"Išsaugoti priminimus"}).click();
+  await expect(second.getByText("Priminimų nustatymai išsaugoti.")).toBeVisible();
+  await held.release();
+  await expect(first.getByText("Priminimų nustatymai išsaugoti.")).toBeVisible();
+  await expect(first.locator('input[name="revision"]')).toHaveValue("2");
+  await expect(first.getByRole("checkbox",{name:"Įjungti garantijos priminimus el. paštu"})).toBeChecked();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("90");
+  await first.getByLabel("Priminti prieš").selectOption("30");
+  const conflict=await holdAction(first,"/nustatymai");
+  await first.getByRole("button",{name:"Išsaugoti priminimus"}).click();
+  await conflict.serverCompleted;
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await conflict.release();
+  await expect(first.getByText(/Nustatymai pasikeitė kitur/)).toBeVisible();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("30");
+  await first.reload();
+  await expect(first.getByRole("checkbox",{name:"Įjungti garantijos priminimus el. paštu"})).not.toBeChecked();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("7");
+  await first.getByLabel("Priminti prieš").selectOption("90");
+  await first.locator('input[name="revision"]').evaluate((input:HTMLInputElement)=>{input.value="0";});
+  const invalid=await holdAction(first,"/nustatymai");
+  await first.getByRole("button",{name:"Išsaugoti priminimus"}).click();
+  await invalid.serverCompleted;
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await invalid.release();
+  await expect(first.getByText("Patikrink priminimų pasirinkimus.")).toBeVisible();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("90");
+  await first.reload();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("7");
+  await context.close();
+});
+
+test("atidėtas pirkinio atsakas ir klaida išsaugo įvestį be svetimos revizijos",async({browser})=>{
+  const context=await browser.newContext();
+  const first=await context.newPage(), second=await context.newPage();
+  await signIn(first,`purchase-race-${randomUUID()}@example.test`);
+  const id=await makePurchase(first,"Pirkinys su lenktynėmis");
+  await first.goto(`/pirkiniai/${id}`);
+  await first.getByLabel("Šio pirkinio pasirinkimas").selectOption("custom");
+  await first.getByLabel("Priminti prieš").selectOption("7");
+  const held=await holdAction(first,`/pirkiniai/${id}`);
+  await first.getByRole("button",{name:"Išsaugoti priminimą"}).click();
+  await held.serverCompleted;
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toBeDisabled();
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await second.goto(`/pirkiniai/${id}`);
+  await second.getByLabel("Šio pirkinio pasirinkimas").selectOption("off");
+  await second.getByRole("button",{name:"Išsaugoti priminimą"}).click();
+  await expect(second.getByText("Pirkinio priminimo pasirinkimas išsaugotas.")).toBeVisible();
+  await held.release();
+  await expect(first.getByText("Pirkinio priminimo pasirinkimas išsaugotas.")).toBeVisible();
+  await expect(first.locator('input[name="revision"]')).toHaveValue("2");
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toHaveValue("custom");
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("7");
+  await first.getByLabel("Priminti prieš").selectOption("30");
+  const conflict=await holdAction(first,`/pirkiniai/${id}`);
+  await first.getByRole("button",{name:"Išsaugoti priminimą"}).click();
+  await conflict.serverCompleted;
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await conflict.release();
+  await expect(first.getByText(/Pirkinys pasikeitė kitur/)).toBeVisible();
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("30");
+  await first.reload();
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toHaveValue("off");
+  await first.getByLabel("Šio pirkinio pasirinkimas").selectOption("custom");
+  await first.getByLabel("Priminti prieš").selectOption("90");
+  await first.locator('input[name="revision"]').evaluate((input:HTMLInputElement)=>{input.value="0";});
+  const invalid=await holdAction(first,`/pirkiniai/${id}`);
+  await first.getByRole("button",{name:"Išsaugoti priminimą"}).click();
+  await invalid.serverCompleted;
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toBeDisabled();
+  await expect(first.getByLabel("Priminti prieš")).toBeDisabled();
+  await invalid.release();
+  await expect(first.getByText("Patikrink priminimo pasirinkimą.")).toBeVisible();
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toHaveValue("custom");
+  await expect(first.getByLabel("Priminti prieš")).toHaveValue("90");
+  await first.reload();
+  await expect(first.getByLabel("Šio pirkinio pasirinkimas")).toHaveValue("off");
+  await context.close();
 });

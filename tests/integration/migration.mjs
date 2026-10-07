@@ -13,11 +13,14 @@ const appUrl = new URL(process.env.DATABASE_URL);
 if (ownerUrl.pathname !== "/cekis_test" || appUrl.pathname !== "/cekis_test") throw new Error("Use the disposable cekis_test connection only.");
 const name = `cekis_sprint6_${randomUUID().replaceAll("-", "")}`;
 const oldDir = await mkdtemp(join(tmpdir(), "cekis-sprint5-migrations-"));
+const legacyName = `cekis_sprint6_fix_${randomUUID().replaceAll("-", "")}`;
+const legacyDir = await mkdtemp(join(tmpdir(), "cekis-sprint6-migrations-"));
 const testOwnerUrl = new URL(ownerUrl); testOwnerUrl.pathname = `/${name}`;
 const testAppUrl = new URL(appUrl); testAppUrl.pathname = `/${name}`;
 const admin = new Client({ connectionString: ownerUrl.toString() });
 await admin.connect();
 let created = false;
+let legacyCreated = false;
 try {
   await admin.query(`CREATE DATABASE "${name}"`); created = true;
   await mkdir(join(oldDir, "meta"));
@@ -79,9 +82,50 @@ try {
       has_schema_privilege(current_user,'public','CREATE') AS ddl`)).rows[0];
     if (rights.current_user !== "cekis_app" || !rights.dml || !rights.preferences || !rights.work || rights.ddl) throw new Error("App role permissions changed.");
   } finally { await app.end(); }
-  console.log("Sprint 5 upgrade, repeat migration, receipt association, reminder defaults/constraints and limited app role: passed");
+  const legacyOwnerUrl = new URL(ownerUrl); legacyOwnerUrl.pathname = `/${legacyName}`;
+  const legacyAppUrl = new URL(appUrl); legacyAppUrl.pathname = `/${legacyName}`;
+  await admin.query(`CREATE DATABASE "${legacyName}"`); legacyCreated = true;
+  await mkdir(join(legacyDir,"meta"));
+  const legacyJournal = JSON.parse(await readFile("drizzle/meta/_journal.json","utf8"));
+  legacyJournal.entries = legacyJournal.entries.filter((entry)=>entry.idx <= 10);
+  await writeFile(join(legacyDir,"meta","_journal.json"),JSON.stringify(legacyJournal));
+  for (const entry of legacyJournal.entries) await copyFile(`drizzle/${entry.tag}.sql`,join(legacyDir,`${entry.tag}.sql`));
+  const legacyPool = new Pool({connectionString:legacyOwnerUrl.toString()});
+  try {
+    await migrate(drizzle(legacyPool),{migrationsFolder:legacyDir});
+    const legacyOwner = `legacy-${randomUUID()}`;
+    await legacyPool.query(`INSERT INTO "user"(id,name,email,email_verified) VALUES($1,'Legacy','legacy@example.test',true)`,[legacyOwner]);
+    const ids=[randomUUID(),randomUUID(),randomUUID()];
+    for (const [index,mode,offset] of [[0,"inherit",null],[1,"off",null],[2,"custom",7]]) {
+      await legacyPool.query(`INSERT INTO purchase(id,owner_id,submission_key,product_name,seller,purchase_date,warranty_state,warranty_end_date,warranty_source,reminder_mode,reminder_offset)
+        VALUES($1,$2,$3,'Senas pirkinys','Pardavėjas','2028-01-01','known','2029-01-01','date',$4,$5)`,[ids[index],legacyOwner,randomUUID(),mode,offset]);
+    }
+    await migrate(drizzle(legacyPool),{migrationsFolder:"drizzle"});
+    await migrate(drizzle(legacyPool),{migrationsFolder:"drizzle"});
+    const valid=(await legacyPool.query("SELECT reminder_mode,reminder_offset FROM purchase WHERE owner_id=$1 ORDER BY reminder_mode",[legacyOwner])).rows;
+    if (valid.length!==3 || valid[0].reminder_mode!=="custom" || valid[0].reminder_offset!==7 || valid[1].reminder_mode!=="inherit" || valid[1].reminder_offset!==null || valid[2].reminder_mode!=="off" || valid[2].reminder_offset!==null)
+      throw new Error("Forward constraint migration changed valid reminder rows.");
+    await legacyPool.query(`GRANT USAGE ON SCHEMA public TO cekis_app`);
+    await legacyPool.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO cekis_app`);
+    await admin.query(`GRANT CONNECT ON DATABASE "${legacyName}" TO cekis_app`);
+    const legacyApp = new Client({connectionString:legacyAppUrl.toString()});
+    await legacyApp.connect();
+    try {
+      for (const statement of [
+        `UPDATE purchase SET reminder_mode='custom',reminder_offset=NULL WHERE id=$1`,
+        `INSERT INTO purchase(owner_id,submission_key,product_name,seller,purchase_date,warranty_state,warranty_end_date,warranty_source,reminder_mode,reminder_offset)
+         VALUES($1,$2,'Blogas pirkinys','Pardavėjas','2028-01-01','known','2029-01-01','date','custom',NULL)`,
+      ]) {
+        try { await legacyApp.query(statement,statement.startsWith("UPDATE")?[ids[0]]:[legacyOwner,randomUUID()]); throw new Error("NULL custom offset was accepted."); }
+        catch(error) { if(error.code!=="23514" || error.constraint!=="purchase_reminder_check") throw error; }
+      }
+    } finally { await legacyApp.end(); }
+  } finally { await legacyPool.end(); }
+  console.log("Sprint 5 and populated Sprint 6 upgrades, repeat migration, receipt association, reminder constraints and limited app role: passed");
 } finally {
   if (created) await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+  if (legacyCreated) await admin.query(`DROP DATABASE "${legacyName}" WITH (FORCE)`);
   await admin.end();
   await rm(oldDir, { recursive: true, force: true });
+  await rm(legacyDir, { recursive: true, force: true });
 }

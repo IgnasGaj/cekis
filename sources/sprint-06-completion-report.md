@@ -2,7 +2,7 @@
 
 Date: 2026-10-07 (Europe/Vilnius). Repository: https://github.com/IgnasGaj/cekis.git. Branch: `feature/sprint-06-warranty-email-reminders`.
 
-Corrected Sprint 5 base: `feature/sprint-05-warranty-tracking` at `5473ed0b628a5bc51dccf041cd005257807a2f4b`. The repository default branch still points to Sprint 1, so this branch was created from the corrected Sprint 5 head. Implementation commit: `bbc49619a415c3a7f0c93a78a3f38316ad9b44e4`. This report is a later documentation commit. The exact final documentation-head SHA and its CI result are recorded in the delivery response after push; the [branch CI badge](https://github.com/IgnasGaj/cekis/actions/workflows/ci.yml/badge.svg?branch=feature%2Fsprint-06-warranty-email-reminders) follows the latest pushed head. CI was pending when this report was written; no earlier run is presented as final-head evidence.
+Corrected Sprint 5 base: `feature/sprint-05-warranty-tracking` at `5473ed0b628a5bc51dccf041cd005257807a2f4b`. The repository default branch still points to Sprint 1, so this branch was created from the corrected Sprint 5 head. Initial implementation commit: `bbc49619a415c3a7f0c93a78a3f38316ad9b44e4`; initial documentation head: `f3656d6780524e8ee49b8136601f25c7e5a947e6`. Its exact-head [CI run](https://github.com/IgnasGaj/cekis/actions/runs/37584771515) passed. A later correction adds the fixes and verification in [the correction report](sprint-06-correction-report.md). The correction's final pushed SHA and exact CI result are recorded in its delivery response; the [branch CI badge](https://github.com/IgnasGaj/cekis/actions/workflows/ci.yml/badge.svg?branch=feature%2Fsprint-06-warranty-email-reminders) follows the latest pushed head.
 
 ## Corrected baseline
 
@@ -20,7 +20,7 @@ The calendar uses confirmed PostgreSQL dates and Europe/Vilnius today. Due date 
 
 There are at most five transport attempts. Definite SMTP 4xx rejections use 15-minute, one-hour, six-hour and 24-hour backoff shifted to the send window; definite 5xx/configuration rejection is terminal. Unknown acceptance after timeout/crash stays `uncertain`. `accepted` means SMTP provider acceptance, not inbox arrival. Nodemailer's [SMTP transport](https://nodemailer.com/smtp) and [send response](https://nodemailer.com/) document timeouts and acceptance fields. This SMTP adapter has no provider idempotency-key API, lookup or retention window; exactly-once external delivery cannot be claimed. The safe operator inspection, evidence-based recovery and scheduler/secret rotation steps are in [Sprint 6 operating notes](sprint-06-operations.md).
 
-## Verification
+## Initial verification
 
 | Check | Result |
 | --- | --- |
@@ -37,6 +37,10 @@ There are at most five transport attempts. Definite SMTP 4xx rejections use 15-m
 The first production-build attempt used the developer's LAN-only `.env.local` `APP_URL`, which intentionally fails production URL validation. The synthetic trusted loopback origin above passed. An early browser run exposed a duplicate displayed address in Settings; the display was consolidated. A focused stale-form run then exposed React's form reset on conflict; explicit transition submission now preserves selected inputs. All affected focused checks and the final full 35-case browser suite passed after those fixes.
 
 The Mailpit test created a known purchase, opted a verified account in, ran the actual protected worker at a controlled Vilnius send-window clock, fetched the actual SMTP message, checked recipient, escaped product text, saved end date and authenticated link, reran the worker and confirmed exactly one reminder message and one accepted row. It proves local SMTP handoff only. No approved external credentials or consenting external test recipient were available, so no external mailbox send was attempted. No physical iPhone/Android check or hosted scheduler run was performed. Browser viewports are simulations. No production migration, paid provider activation, merge or deployment occurred.
+
+## Audit corrections
+
+The subsequent correction rechecks the Vilnius window during final authorization and immediately before SMTP, returns each action's revision from its own transaction, retries proven TCP connection refusal, disables and guards pending reminder forms, and adds migration 0011 to reject a null custom offset. New live PostgreSQL, actual local SMTP and delayed browser regressions cover these changes. See [Sprint 6 correction verification](sprint-06-correction-report.md) for exact commands, counts, evidence and remaining external limits. The initial verification table above remains a record of the initial implementation, not a claim that those checks covered the later findings.
 
 ## Remaining production configuration
 

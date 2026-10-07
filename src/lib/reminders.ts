@@ -79,7 +79,7 @@ export async function saveReminderSettings(ownerId: string, enabled: boolean, of
     const pref = await preferenceForUpdate(client, ownerId);
     if (pref.revision !== expectedRevision) { await client.query("ROLLBACK"); return "conflict" as const; }
     if (enabled && (!pref.email_verified || !transportReady())) { await client.query("ROLLBACK"); return "unavailable" as const; }
-    await client.query("UPDATE reminder_preference SET enabled=$2,default_offset=$3,revision=revision+1 WHERE user_id=$1", [ownerId,enabled,offset]);
+    const saved = await client.query<{ revision: number }>("UPDATE reminder_preference SET enabled=$2,default_offset=$3,revision=revision+1 WHERE user_id=$1 RETURNING revision", [ownerId,enabled,offset]);
     if (!enabled || pref.default_offset !== offset) {
       await client.query(`UPDATE warranty_reminder wr SET status='cancelled',claim_token=NULL,lease_until=NULL
         FROM purchase p WHERE wr.purchase_id=p.id AND wr.owner_id=$1 AND p.owner_id=$1
@@ -87,7 +87,7 @@ export async function saveReminderSettings(ownerId: string, enabled: boolean, of
         AND ($2::boolean=false OR p.reminder_mode='inherit')`, [ownerId,enabled]);
     }
     await client.query("COMMIT");
-    return "saved" as const;
+    return { result: "saved", revision: saved.rows[0].revision } as const;
   } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
   finally { client.release(); }
 }
@@ -97,14 +97,14 @@ export async function savePurchaseReminder(ownerId: string, purchaseId: string, 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query(`UPDATE purchase SET reminder_mode=$3,reminder_offset=$4,revision=revision+1,updated_at=now()
-      WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL AND revision=$5 RETURNING id`, [purchaseId,ownerId,mode,offset,expectedRevision]);
+    const result = await client.query<{ revision: number }>(`UPDATE purchase SET reminder_mode=$3,reminder_offset=$4,revision=revision+1,updated_at=now()
+      WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL AND revision=$5 RETURNING revision`, [purchaseId,ownerId,mode,offset,expectedRevision]);
     if (!result.rowCount) {
       const exists = await client.query("SELECT 1 FROM purchase WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL", [purchaseId,ownerId]);
       await client.query("ROLLBACK"); return exists.rowCount ? "conflict" as const : "missing" as const;
     }
     await reconcilePurchase(client, ownerId, purchaseId);
-    await client.query("COMMIT"); return "saved" as const;
+    await client.query("COMMIT"); return { result: "saved", revision: result.rows[0].revision } as const;
   } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
   finally { client.release(); }
 }

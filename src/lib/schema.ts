@@ -95,7 +95,7 @@ export const purchase = pgTable("purchase", {
   check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
   check("purchase_date_finite_check", sql`${table.purchaseDate} between date '0001-01-01' and date '9999-12-31'`),
   check("purchase_revision_check", sql`${table.revision} >= 1`),
-  check("purchase_reminder_check", sql`(${table.reminderMode} in ('inherit','off') and ${table.reminderOffset} is null) or (${table.reminderMode} = 'custom' and ${table.reminderOffset} in (7,30,90))`),
+  check("purchase_reminder_check", sql`(${table.reminderMode} in ('inherit','off') and ${table.reminderOffset} is null) or (${table.reminderMode} = 'custom' and ${table.reminderOffset} is not null and ${table.reminderOffset} in (7,30,90))`),
   check("purchase_reminder_revision_check", sql`${table.reminderPrefRevision} >= 0`),
   check("purchase_warranty_check", sql`(${table.warrantyState} in ('unknown','none') and ${table.warrantyEndDate} is null and ${table.warrantyDurationMonths} is null and ${table.warrantySource} is null) or (${table.warrantyState} = 'known' and ${table.warrantyEndDate} is not null and ${table.warrantyEndDate} between date '0001-01-01' and date '9999-12-31' and ${table.warrantyEndDate} >= ${table.purchaseDate} and ${table.warrantySource} is not null and ${table.warrantySource} in ('date','duration') and ((${table.warrantySource} = 'date' and ${table.warrantyDurationMonths} is null) or (${table.warrantySource} = 'duration' and ${table.warrantyDurationMonths} is not null and ${table.warrantyDurationMonths} between 1 and 600)))`),
 ]);

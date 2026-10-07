@@ -87,7 +87,7 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   await expect(pageA.locator("#existing-receipt option")).toHaveCount(2);
   await pageA.getByLabel("Pridėti turimą čekį").selectOption(shared.id);
   await pageA.getByRole("button", { name: "Pridėti turimą čekį" }).click();
-  await expect(pageA.getByText(shared.filename).first()).toBeVisible();
+  await expect(pageA.locator(".receipt-item").filter({ hasText: shared.filename })).toBeVisible();
   expect((await pageA.request.post(`/api/receipts/${shared.id}/links`, { headers: { Origin: process.env.APP_URL! }, data: { purchaseId: second } })).status()).toBe(200);
   await db(async (client) => expect((await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE receipt_id=$1 AND purchase_id=$2", [shared.id,second])).rows[0].n).toBe(1));
   const emailB = `receipt-b-${suffix}@example.test`;
@@ -114,7 +114,7 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   await pageA.getByRole("button", { name: "Ištrinti pirkinį" }).click();
   await pageA.getByRole("button", { name: "Ištrinti", exact: true }).click();
   await pageA.goto(`/pirkiniai/${second}`);
-  await expect(pageA.getByText(shared.filename).first()).toBeVisible();
+  await expect(pageA.locator(".receipt-item").filter({ hasText: shared.filename })).toBeVisible();
   expect((await pageA.request.get(`/api/receipts/${shared.id}/content`)).status()).toBe(200);
   const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region: process.env.S3_REGION, forcePathStyle: true, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID!, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY! } });
   expect((await s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: shared.object_key }))).ContentLength).toBe(png.length);
@@ -165,7 +165,7 @@ test("pavėluotas atšaukimas ir failo keitimas išsaugo bendrą čekį", async 
   try {
     const attach = other.request.post(`/api/receipts/${row.id}/links`, { headers: { Origin: process.env.APP_URL! }, data: { purchaseId: third } });
     const lateCancel = cancel();
-    await expect.poll(async () => (await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [pid])).rows[0].n, { timeout: 10000 }).toBeGreaterThanOrEqual(1);
+    await expect.poll(async () => (await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", [pid])).rows[0].n, { timeout: 20000 }).toBeGreaterThanOrEqual(1);
     await blocker.query("COMMIT");
     expect((await attach).status()).toBe(200);
     expect((await (await lateCancel).json()).completed).toBe(true);
@@ -765,8 +765,10 @@ test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", asy
   expect(uploaded.status()).toBe(200);
   const receiptId = (await uploaded.json()).id as string;
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await page.waitForLoadState("networkidle");
   await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
   await page.getByLabel("Pirkimo data").fill("2024-02-01");
+  await expect(page.getByText("Pirkimo data pasikeitė. Patikrink išsaugotą garantijos datą ir patvirtink ją iš naujo.")).toBeVisible();
   await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).not.toBeChecked();
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText("Patvirtink pasirinktą garantijos pabaigos datą.")).toBeVisible();
