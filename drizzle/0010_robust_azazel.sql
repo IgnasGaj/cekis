@@ -1,0 +1,6 @@
+CREATE INDEX "purchase_reminder_dirty_idx" ON "purchase" USING btree ("owner_id","reminder_pref_revision");--> statement-breakpoint
+ALTER TABLE "purchase" ADD CONSTRAINT "purchase_reminder_revision_check" CHECK ("purchase"."reminder_pref_revision" >= 0);--> statement-breakpoint
+ALTER TABLE "user" ADD CONSTRAINT "user_reminder_recipient_version_check" CHECK ("user"."reminder_recipient_version" >= 1);--> statement-breakpoint
+ALTER TABLE "warranty_reminder" ADD CONSTRAINT "warranty_reminder_identity_check" CHECK ("warranty_reminder"."identity" ~ '^[0-9a-f]{64}$');--> statement-breakpoint
+ALTER TABLE "warranty_reminder" ADD CONSTRAINT "warranty_reminder_lease_check" CHECK (("warranty_reminder"."status" = 'processing' and "warranty_reminder"."claim_token" is not null and "warranty_reminder"."lease_until" is not null) or ("warranty_reminder"."status" <> 'processing' and "warranty_reminder"."claim_token" is null and "warranty_reminder"."lease_until" is null));--> statement-breakpoint
+ALTER TABLE "warranty_reminder" ADD CONSTRAINT "warranty_reminder_accepted_check" CHECK ("warranty_reminder"."status" <> 'accepted' or "warranty_reminder"."accepted_at" is not null);

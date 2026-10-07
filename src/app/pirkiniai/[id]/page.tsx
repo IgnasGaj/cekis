@@ -8,6 +8,8 @@ import { ReceiptManager } from "@/components/receipt-manager";
 import { DeleteButton } from "../delete-button";
 import { todayInVilnius } from "@/lib/purchase-validation";
 import { dayPhrase, warrantyStatus } from "@/lib/warranty";
+import { getPurchaseReminderSummary } from "@/lib/reminders";
+import { ReminderControl } from "./reminder-control";
 
 export const dynamic = "force-dynamic";
 export default async function PurchaseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -32,6 +34,7 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
   if (context.warranty !== "all") contextQuery.set("warranty", context.warranty);
   if (context.page > 1) contextQuery.set("page", String(context.page));
   const status = warrantyStatus({ warrantyState: row.warrantyState as "unknown" | "none" | "known", warrantyEndDate: row.warrantyEndDate }, todayInVilnius());
+  const reminderStatus = await getPurchaseReminderSummary(row.ownerId,row);
   return <PurchaseShell>
     <Link href={listHref(context)} className="back-link">← Mano pirkiniai</Link>
     <section className="page-heading detail-heading"><h1>{row.productName}</h1><p>{row.seller}</p></section>
@@ -44,6 +47,7 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
       {row.price && row.currency && <div className="detail-row"><span>Kaina</span><strong>{displayPrice(row.price, row.currency)}</strong></div>}
       {row.notes && <div className="detail-row"><span>Pastabos</span><p className="notes-text">{row.notes}</p></div>}
     </section>
+    <ReminderControl id={id} mode={row.reminderMode} offset={row.reminderOffset} revision={row.revision} status={reminderStatus} />
     <section className="placeholder-card" aria-label="Garantijos informacija"><h2>Garantija</h2><p><strong>{status.label}</strong></p>
       {row.warrantyEndDate && <p>Pabaigos data: {displayDate(row.warrantyEndDate)}</p>}
       {status.days !== null && status.days >= 0 && <p>{dayPhrase(status.days)}</p>}

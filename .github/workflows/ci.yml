@@ -36,6 +36,8 @@ jobs:
       SMTP_HOST: 127.0.0.1
       SMTP_PORT: "1025"
       SMTP_FROM: "Čekis <prisijungimas@cekis.local>"
+      REMINDER_TRANSPORT_ENABLED: "true"
+      REMINDER_WORKER_SECRET: "disposable-ci-worker-secret-123456789"
       AUTH_SEND_LIMIT: "5"
       AUTH_SEND_WINDOW_SECONDS: "3600"
       S3_ENDPOINT: http://127.0.0.1:9000
@@ -63,6 +65,7 @@ jobs:
       - run: npm run test:lint-rules
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:reminders
       - run: npm run ocr:prepare
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

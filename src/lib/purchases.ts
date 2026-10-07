@@ -6,6 +6,7 @@ import { requireSession } from "./session";
 import type { parsePurchaseFields } from "./purchase-validation";
 import { todayInVilnius } from "./purchase-validation";
 import { emptyWarranty, type WarrantyInput } from "./warranty";
+import { reconcilePurchase } from "./reminders";
 
 type Values = NonNullable<ReturnType<typeof parsePurchaseFields>["value"]>;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -75,24 +76,45 @@ export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<t
 export async function createPurchase(key: string, values: Values, warranty?: WarrantyInput) {
   const { user } = await requireSession();
   if (!isPurchaseId(key)) return null;
-  const [inserted] = await db.insert(purchase).values({ ...values, ...warranty, ownerId: user.id, submissionKey: key }).onConflictDoNothing({ target: [purchase.ownerId, purchase.submissionKey] }).returning({ id: purchase.id });
-  if (inserted) return inserted.id;
-  const [existing] = await db.select({ id: purchase.id, deletedAt: purchase.deletedAt }).from(purchase)
-    .where(and(eq(purchase.ownerId, user.id), eq(purchase.submissionKey, key))).limit(1);
-  return existing && !existing.deletedAt ? existing.id : null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const inserted = await client.query<{ id: string }>(`INSERT INTO purchase(owner_id,submission_key,product_name,seller,purchase_date,price,currency,notes,
+      warranty_state,warranty_end_date,warranty_duration_months,warranty_source)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(owner_id,submission_key) DO NOTHING RETURNING id`,
+      [user.id,key,values.productName,values.seller,values.purchaseDate,values.price,values.currency,values.notes,
+        warranty?.warrantyState ?? "unknown",warranty?.warrantyEndDate ?? null,warranty?.warrantyDurationMonths ?? null,warranty?.warrantySource ?? null]);
+    if (inserted.rows[0]) await reconcilePurchase(client,user.id,inserted.rows[0].id);
+    const existing = inserted.rows[0] ?? (await client.query<{ id: string; deleted_at: Date | null }>(
+      "SELECT id,deleted_at FROM purchase WHERE owner_id=$1 AND submission_key=$2",[user.id,key])).rows[0];
+    await client.query("COMMIT");
+    return existing && !("deleted_at" in existing && existing.deleted_at) ? existing.id : null;
+  } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+  finally { client.release(); }
 }
 
 export async function updatePurchase(id: string, values: Values, expectedRevision: number, warranty?: WarrantyInput): Promise<"updated" | "missing" | "conflict" | "review"> {
   const { user } = await requireSession();
   if (!isPurchaseId(id)) return "missing";
-  const rows = await db.update(purchase).set({ ...values, ...warranty, revision: sql`${purchase.revision} + 1`, updatedAt: new Date() })
-    .where(and(eq(purchase.id, id), eq(purchase.ownerId, user.id), isNull(purchase.deletedAt), eq(purchase.revision, expectedRevision),
-      warranty ? undefined : sql`(${purchase.warrantyState} <> 'known' or ${purchase.purchaseDate} = ${values.purchaseDate})`)).returning({ id: purchase.id });
-  if (rows.length) return "updated";
-  const [current] = await db.select({ revision: purchase.revision, warrantyState: purchase.warrantyState, purchaseDate: purchase.purchaseDate }).from(purchase).where(and(eq(purchase.id, id), eq(purchase.ownerId, user.id), isNull(purchase.deletedAt))).limit(1);
-  if (!current) return "missing";
-  if (current.revision !== expectedRevision) return "conflict";
-  return "review";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const rows = await client.query(`UPDATE purchase SET product_name=$3,seller=$4,purchase_date=$5,price=$6,currency=$7,notes=$8,
+      warranty_state=coalesce($9,warranty_state),warranty_end_date=case when $9::text is null then warranty_end_date else $10::date end,
+      warranty_duration_months=case when $9::text is null then warranty_duration_months else $11::integer end,
+      warranty_source=case when $9::text is null then warranty_source else $12::text end,revision=revision+1,updated_at=now()
+      WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL AND revision=$13
+      AND ($9::text IS NOT NULL OR warranty_state <> 'known' OR purchase_date=$5::date) RETURNING id`,
+      [id,user.id,values.productName,values.seller,values.purchaseDate,values.price,values.currency,values.notes,
+        warranty?.warrantyState ?? null,warranty?.warrantyEndDate ?? null,warranty?.warrantyDurationMonths ?? null,warranty?.warrantySource ?? null,expectedRevision]);
+    if (rows.rowCount) { await reconcilePurchase(client,user.id,id); await client.query("COMMIT"); return "updated"; }
+    const current = (await client.query<{revision:number; warranty_state:string; purchase_date:string}>(
+      "SELECT revision,warranty_state,purchase_date::text FROM purchase WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL",[id,user.id])).rows[0];
+    await client.query("ROLLBACK");
+    if (!current) return "missing";
+    return current.revision !== expectedRevision ? "conflict" : "review";
+  } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+  finally { client.release(); }
 }
 
 export async function deletePurchase(id: string) {
@@ -105,6 +127,7 @@ export async function deletePurchase(id: string) {
     if (!active.rowCount) { await client.query("ROLLBACK"); return false; }
     // Keep only the owner-bound submission key as a replay tombstone; erase user content.
     await client.query("UPDATE purchase SET product_name='Ištrinta',seller='Ištrinta',purchase_date='1970-01-01',price=NULL,currency=NULL,notes=NULL,warranty_state='unknown',warranty_end_date=NULL,warranty_duration_months=NULL,warranty_source=NULL,revision=revision+1,deleted_at=now(),updated_at=now() WHERE id=$1", [id]);
+    await reconcilePurchase(client,user.id,id);
     const linked = await client.query("SELECT receipt_id FROM purchase_receipt WHERE purchase_id=$1 ORDER BY receipt_id", [id]);
     for (const row of linked.rows) await client.query("SELECT id FROM receipt WHERE id=$1 FOR UPDATE", [row.receipt_id]);
     await client.query("DELETE FROM purchase_receipt WHERE purchase_id=$1", [id]);

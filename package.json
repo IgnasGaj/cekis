@@ -4,6 +4,7 @@
   "scripts": {
     "test": "vitest run",
     "test:db": "node tests/integration/migration.mjs",
+    "test:reminders": "vitest run --config vitest.integration.config.mjs",
     "test:lint-rules": "node scripts/check-lint-rules.mjs",
     "dev": "next dev --hostname 127.0.0.1 --port 3100",
     "build": "next build",
@@ -14,6 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "mail:dev": "mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:1080",
+    "reminders:run": "node scripts/run-reminders.mjs",
     "db:grant": "node scripts/grant-app.mjs",
     "db:check-role": "node scripts/check-runtime-role.mjs",
     "setup:local": "node scripts/setup-local.mjs",

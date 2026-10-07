@@ -22,6 +22,8 @@ const schema = z.object({
   SMTP_FROM: z.string().min(3),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
+  REMINDER_TRANSPORT_ENABLED: z.enum(["true", "false"]).default("false"),
+  REMINDER_WORKER_SECRET: z.string().min(32).optional(),
   AUTH_SEND_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
   AUTH_SEND_WINDOW_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
   S3_ENDPOINT: z.url().optional(),

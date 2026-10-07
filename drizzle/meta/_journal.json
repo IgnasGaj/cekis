@@ -64,6 +64,20 @@
       "when": 1791309573012,
       "tag": "0008_careful_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791355143004,
+      "tag": "0009_cooing_scarecrow",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791355906890,
+      "tag": "0010_robust_azazel",
+      "breakpoints": true
     }
   ]
 }

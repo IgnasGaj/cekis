@@ -1,5 +1,9 @@
 # Progress
 
+## Sprint 6 warranty email reminders, 2026-10-07
+
+The `feature/sprint-06-warranty-email-reminders` branch adds deliberate account and purchase reminder choices, verified-recipient invalidation, a durable PostgreSQL schedule/outbox, a protected worker with bounded SMTP attempts, Lithuanian reminder mail and status controls. [Operating notes](../sources/sprint-06-operations.md) cover the Vilnius window, recovery and scheduler configuration. The [completion report](../sources/sprint-06-completion-report.md) records verification and delivery status. No hosted scheduler or external sender has been activated.
+
 ## Sprint 5 warranty tracking, 2026-10-06
 
 The `feature/sprint-05-warranty-tracking` branch adds per-purchase unknown/none/known states, explicitly confirmed end dates and whole-month suggestions, Vilnius calendar status, owner-scoped list filters and expiry ordering. Migration 0008 backfills existing purchases as unknown and adds a revision guard for purchase and OCR review edits. The saved warranty remains separate from shared receipts, and OCR never fills it. Verification and delivery details are in `sources/sprint-05-completion-report.md`.

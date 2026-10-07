@@ -2,6 +2,13 @@ import { defineConfig, devices } from "@playwright/test";
 import { config as loadEnv } from "dotenv";
 
 if (!process.env.CI) loadEnv({ path: ".env.test.local", override: true });
+// Disposable services and a fixed local send-window clock for reminder integration cases.
+const dateParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius",year:"numeric",month:"2-digit",day:"2-digit" }).formatToParts(new Date()).map((part) => [part.type,part.value]));
+const vilniusDay = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+process.env.CEKIS_TEST_WORKER = "true";
+process.env.REMINDER_TEST_NOW = `${vilniusDay}T10:00:00.000Z`;
+process.env.REMINDER_TRANSPORT_ENABLED = "true";
+process.env.REMINDER_WORKER_SECRET ??= "disposable-browser-test-worker-secret-123456";
 const testDatabase = new URL(process.env.MIGRATION_DATABASE_URL ?? "postgres://invalid/invalid");
 const appDatabase = new URL(process.env.DATABASE_URL ?? "postgres://invalid/invalid");
 if (testDatabase.pathname !== "/cekis_test" || appDatabase.pathname !== "/cekis_test") {

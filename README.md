@@ -54,6 +54,7 @@ npm run lint
 npm run typecheck
 npm test
 npm run test:db
+npm run test:reminders
 npm run test:e2e
 npm run build
 npm run start
@@ -69,6 +70,12 @@ npm run test:e2e
 ```
 
 Playwright refuses to run unless both database URLs name `cekis_test`. It starts the app automatically if port 3100 is free. In CI, PostgreSQL, Mailpit and local S3 are disposable services. `npm run db:generate` creates a new SQL migration after a schema change; review its SQL before applying it.
+
+## Warranty email reminders (Sprint 6)
+
+Reminders start disabled for every account. In **Nustatymai**, a user with a verified sign-in email can deliberately enable them and choose 90, 30 or 7 calendar days before a saved warranty end date (30 by default). Each purchase can inherit that choice, turn its own reminder off, or choose one offset. A global opt-out always wins. The current account email is the read-only recipient. Unknown, absent or expired warranties do not send. A newly enabled or edited already-due warranty receives one catch-up reminder while its saved end date is still today or later. The end date remains inclusive.
+
+The worker persists schedules and attempts in PostgreSQL. A scheduler must POST to `/api/reminders/worker` at least hourly with `Authorization: Bearer <REMINDER_WORKER_SECRET>`. It sends only from 09:00 through 20:59:59 Europe/Vilnius. Configure the server-only `REMINDER_TRANSPORT_ENABLED=true` only after the SMTP sender is ready; this switch is separate from sign-in email. `npm run reminders:run` invokes the protected endpoint against a running app using the local environment file. No in-process timer is used. A response reports aggregate counts without addresses or message content. See [Sprint 6 operating notes](sources/sprint-06-operations.md) for scheduler setup, retries, status inspection, ambiguity recovery and external-provider limitations.
 
 ## Manual purchases
 

@@ -4,6 +4,7 @@ import { getEnv } from "@/lib/env";
 import { isPurchaseId } from "@/lib/purchases";
 import { parsePurchaseFields, type PurchaseFields } from "@/lib/purchase-validation";
 import { parseWarranty, type WarrantyDraft } from "@/lib/warranty";
+import { reconcilePurchase } from "@/lib/reminders";
 
 export const runtime = "nodejs";
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -55,6 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       warranty_source=case when $9::text is null then warranty_source else $12::text end,revision=revision+1,updated_at=now()
       WHERE id=$7 AND owner_id=$8`, [value.productName,value.seller,value.purchaseDate,value.price,value.currency,value.notes,body.purchaseId,session.user.id,warranty?.value?.warrantyState ?? null,warranty?.value?.warrantyEndDate ?? null,warranty?.value?.warrantyDurationMonths ?? null,warranty?.value?.warrantySource ?? null]);
     await client.query("UPDATE receipt SET receipt_number=$1,updated_at=now() WHERE id=$2 AND owner_id=$3", [receiptNumber.trim() || null,id,session.user.id]);
+    await reconcilePurchase(client,session.user.id,body.purchaseId);
     await client.query("COMMIT");
     return Response.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {

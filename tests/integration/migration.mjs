@@ -11,8 +11,8 @@ config({ path: process.env.CEKIS_ENV_FILE ?? ".env.test.local" });
 const ownerUrl = new URL(process.env.MIGRATION_DATABASE_URL);
 const appUrl = new URL(process.env.DATABASE_URL);
 if (ownerUrl.pathname !== "/cekis_test" || appUrl.pathname !== "/cekis_test") throw new Error("Use the disposable cekis_test connection only.");
-const name = `cekis_sprint5_${randomUUID().replaceAll("-", "")}`;
-const oldDir = await mkdtemp(join(tmpdir(), "cekis-sprint4-migrations-"));
+const name = `cekis_sprint6_${randomUUID().replaceAll("-", "")}`;
+const oldDir = await mkdtemp(join(tmpdir(), "cekis-sprint5-migrations-"));
 const testOwnerUrl = new URL(ownerUrl); testOwnerUrl.pathname = `/${name}`;
 const testAppUrl = new URL(appUrl); testAppUrl.pathname = `/${name}`;
 const admin = new Client({ connectionString: ownerUrl.toString() });
@@ -22,7 +22,7 @@ try {
   await admin.query(`CREATE DATABASE "${name}"`); created = true;
   await mkdir(join(oldDir, "meta"));
   const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
-  journal.entries = journal.entries.filter((entry) => entry.idx <= 7);
+  journal.entries = journal.entries.filter((entry) => entry.idx <= 8);
   await writeFile(join(oldDir, "meta", "_journal.json"), JSON.stringify(journal));
   for (const entry of journal.entries) await copyFile(`drizzle/${entry.tag}.sql`, join(oldDir, `${entry.tag}.sql`));
   const pool = new Pool({ connectionString: testOwnerUrl.toString() });
@@ -32,8 +32,9 @@ try {
   const ownerId = `sprint5-${randomUUID()}`;
   const purchaseId = randomUUID(), receiptId = randomUUID();
   try {
-    await owner.query(`INSERT INTO "user" (id,name,email) VALUES ($1,'Sprint 5','synthetic@example.test')`, [ownerId]);
-    await owner.query(`INSERT INTO purchase (id,owner_id,submission_key,product_name,seller,purchase_date) VALUES ($1,$2,$3,'Senas pirkinys','Pardavėjas','2024-01-31')`, [purchaseId,ownerId,randomUUID()]);
+    await owner.query(`INSERT INTO "user" (id,name,email,email_verified) VALUES ($1,'Sprint 6','synthetic@example.test',true)`, [ownerId]);
+    await owner.query(`INSERT INTO purchase (id,owner_id,submission_key,product_name,seller,purchase_date,warranty_state,warranty_end_date,warranty_source)
+      VALUES ($1,$2,$3,'Senas pirkinys','Pardavėjas','2024-01-31','known','2028-02-29','date')`, [purchaseId,ownerId,randomUUID()]);
     await owner.query(`INSERT INTO receipt (id,owner_id,submission_key,target_purchase_id,object_key,filename,content_type,byte_size,sha256,state,expires_at)
       VALUES ($1,$2,$3,$4,$5,'synthetic.png','image/png',8,$6,'ready',now()+interval '1 day')`, [receiptId,ownerId,randomUUID(),purchaseId,`synthetic/${receiptId}`,"a".repeat(64)]);
     await owner.query(`INSERT INTO purchase_receipt (owner_id,purchase_id,receipt_id) VALUES ($1,$2,$3)`, [ownerId,purchaseId,receiptId]);
@@ -44,12 +45,19 @@ try {
   const check = new Client({ connectionString: testOwnerUrl.toString() });
   await check.connect();
   try {
-    const result = await check.query(`SELECT p.warranty_state,p.warranty_end_date,p.warranty_duration_months,p.warranty_source,p.revision,
+    const result = await check.query(`SELECT p.warranty_state,p.warranty_end_date::text AS warranty_end_date,p.warranty_duration_months,p.warranty_source,p.revision,
       r.sha256,r.object_key,pr.receipt_id FROM purchase p JOIN purchase_receipt pr ON pr.purchase_id=p.id JOIN receipt r ON r.id=pr.receipt_id WHERE p.id=$1`, [purchaseId]);
     const row = result.rows[0];
-    if (!row || row.warranty_state !== "unknown" || row.warranty_end_date !== null || row.warranty_duration_months !== null || row.warranty_source !== null || row.revision !== 1 || row.receipt_id !== receiptId || row.sha256 !== "a".repeat(64) || row.object_key !== `synthetic/${receiptId}`) throw new Error("Migration changed existing purchase or receipt metadata.");
+    if (!row || row.warranty_state !== "known" || row.warranty_end_date !== "2028-02-29" || row.warranty_duration_months !== null || row.warranty_source !== "date" || row.revision !== 1 || row.receipt_id !== receiptId || row.sha256 !== "a".repeat(64) || row.object_key !== `synthetic/${receiptId}`) throw new Error("Migration changed existing purchase or receipt metadata.");
+    const defaults = (await check.query(`SELECT p.reminder_mode,p.reminder_offset,p.reminder_pref_revision,u.reminder_recipient_version,
+      (SELECT count(*)::int FROM warranty_reminder) AS work FROM purchase p JOIN "user" u ON u.id=p.owner_id WHERE p.id=$1`, [purchaseId])).rows[0];
+    if (defaults.reminder_mode !== "inherit" || defaults.reminder_offset !== null || defaults.reminder_pref_revision !== 0 || defaults.reminder_recipient_version !== 1 || defaults.work !== 0) throw new Error("Migration silently enabled reminders.");
+    await check.query(`UPDATE "user" SET email_verified=false WHERE id=$1`, [ownerId]);
+    const version = (await check.query(`SELECT reminder_recipient_version FROM "user" WHERE id=$1`,[ownerId])).rows[0].reminder_recipient_version;
+    if (version !== 2) throw new Error("Verification change did not invalidate recipient version.");
     for (const statement of [
-      `UPDATE purchase SET warranty_state='known' WHERE id=$1`,
+      `UPDATE purchase SET reminder_mode='custom',reminder_offset=60 WHERE id=$1`,
+      `UPDATE purchase SET reminder_mode='off',reminder_offset=30 WHERE id=$1`,
       `UPDATE purchase SET warranty_state='known',warranty_end_date='infinity',warranty_source='date' WHERE id=$1`,
       `UPDATE purchase SET warranty_state='none',warranty_end_date='2025-01-01' WHERE id=$1`,
     ]) {
@@ -65,10 +73,13 @@ try {
   const app = new Client({ connectionString: testAppUrl.toString() });
   await app.connect();
   try {
-    const rights = (await app.query(`SELECT current_user,has_table_privilege(current_user,'purchase','SELECT,INSERT,UPDATE,DELETE') AS dml,has_schema_privilege(current_user,'public','CREATE') AS ddl`)).rows[0];
-    if (rights.current_user !== "cekis_app" || !rights.dml || rights.ddl) throw new Error("App role permissions changed.");
+    const rights = (await app.query(`SELECT current_user,has_table_privilege(current_user,'purchase','SELECT,INSERT,UPDATE,DELETE') AS dml,
+      has_table_privilege(current_user,'reminder_preference','SELECT,INSERT,UPDATE,DELETE') AS preferences,
+      has_table_privilege(current_user,'warranty_reminder','SELECT,INSERT,UPDATE,DELETE') AS work,
+      has_schema_privilege(current_user,'public','CREATE') AS ddl`)).rows[0];
+    if (rights.current_user !== "cekis_app" || !rights.dml || !rights.preferences || !rights.work || rights.ddl) throw new Error("App role permissions changed.");
   } finally { await app.end(); }
-  console.log("Sprint 4 upgrade, repeat migration, receipt association, warranty constraints and limited app role: passed");
+  console.log("Sprint 5 upgrade, repeat migration, receipt association, reminder defaults/constraints and limited app role: passed");
 } finally {
   if (created) await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
   await admin.end();

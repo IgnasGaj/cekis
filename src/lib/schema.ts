@@ -6,10 +6,11 @@ export const user = pgTable("user", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
+  reminderRecipientVersion: integer("reminder_recipient_version").notNull().default(1),
   image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [check("user_reminder_recipient_version_check", sql`${table.reminderRecipientVersion} >= 1`)]);
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
@@ -74,6 +75,9 @@ export const purchase = pgTable("purchase", {
   warrantyEndDate: date("warranty_end_date"),
   warrantyDurationMonths: integer("warranty_duration_months"),
   warrantySource: text("warranty_source"),
+  reminderMode: text("reminder_mode").notNull().default("inherit"),
+  reminderOffset: integer("reminder_offset"),
+  reminderPrefRevision: integer("reminder_pref_revision").notNull().default(0),
   revision: integer("revision").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -83,6 +87,7 @@ export const purchase = pgTable("purchase", {
   uniqueIndex("purchase_owner_id_idx").on(table.ownerId, table.id),
   index("purchase_owner_date_idx").on(table.ownerId, table.purchaseDate.desc(), table.createdAt.desc(), table.id.desc()),
   index("purchase_owner_warranty_idx").on(table.ownerId, table.warrantyState, table.warrantyEndDate, table.createdAt, table.id),
+  index("purchase_reminder_dirty_idx").on(table.ownerId, table.reminderPrefRevision),
   check("purchase_product_name_check", sql`length(${table.productName}) between 1 and 200 and ${table.productName} = btrim(${table.productName})`),
   check("purchase_seller_check", sql`length(${table.seller}) between 1 and 200 and ${table.seller} = btrim(${table.seller})`),
   check("purchase_notes_check", sql`${table.notes} is null or length(${table.notes}) <= 2000`),
@@ -90,7 +95,49 @@ export const purchase = pgTable("purchase", {
   check("purchase_currency_check", sql`(${table.price} is null and ${table.currency} is null) or (${table.price} is not null and ${table.currency} is not null and ${table.currency} in ('EUR','USD','GBP','PLN'))`),
   check("purchase_date_finite_check", sql`${table.purchaseDate} between date '0001-01-01' and date '9999-12-31'`),
   check("purchase_revision_check", sql`${table.revision} >= 1`),
+  check("purchase_reminder_check", sql`(${table.reminderMode} in ('inherit','off') and ${table.reminderOffset} is null) or (${table.reminderMode} = 'custom' and ${table.reminderOffset} in (7,30,90))`),
+  check("purchase_reminder_revision_check", sql`${table.reminderPrefRevision} >= 0`),
   check("purchase_warranty_check", sql`(${table.warrantyState} in ('unknown','none') and ${table.warrantyEndDate} is null and ${table.warrantyDurationMonths} is null and ${table.warrantySource} is null) or (${table.warrantyState} = 'known' and ${table.warrantyEndDate} is not null and ${table.warrantyEndDate} between date '0001-01-01' and date '9999-12-31' and ${table.warrantyEndDate} >= ${table.purchaseDate} and ${table.warrantySource} is not null and ${table.warrantySource} in ('date','duration') and ((${table.warrantySource} = 'date' and ${table.warrantyDurationMonths} is null) or (${table.warrantySource} = 'duration' and ${table.warrantyDurationMonths} is not null and ${table.warrantyDurationMonths} between 1 and 600)))`),
+]);
+
+export const reminderPreference = pgTable("reminder_preference", {
+  userId: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(false),
+  defaultOffset: integer("default_offset").notNull().default(30),
+  revision: integer("revision").notNull().default(1),
+}, (table) => [check("reminder_preference_offset_check", sql`${table.defaultOffset} in (7,30,90)`), check("reminder_preference_revision_check", sql`${table.revision} >= 1`)]);
+
+export const warrantyReminder = pgTable("warranty_reminder", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  purchaseId: uuid("purchase_id").notNull(),
+  identity: text("identity").notNull(),
+  endDate: date("end_date").notNull(),
+  offsetDays: integer("offset_days").notNull(),
+  recipientVersion: integer("recipient_version").notNull(),
+  dueDate: date("due_date").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  claimToken: uuid("claim_token"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  dispatchAuthorizedAt: timestamp("dispatch_authorized_at", { withTimezone: true }),
+  providerMessageId: text("provider_message_id"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  errorClass: text("error_class"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("warranty_reminder_identity_idx").on(table.identity),
+  index("warranty_reminder_eligible_idx").on(table.status, table.dueDate, table.nextAttemptAt),
+  index("warranty_reminder_owner_idx").on(table.ownerId, table.purchaseId, table.createdAt),
+  foreignKey({ name: "warranty_reminder_purchase_owner_fk", columns: [table.ownerId, table.purchaseId], foreignColumns: [purchase.ownerId, purchase.id] }),
+  check("warranty_reminder_offset_check", sql`${table.offsetDays} in (7,30,90)`),
+  check("warranty_reminder_date_check", sql`${table.endDate} between date '0001-01-01' and date '9999-12-31' and ${table.dueDate} between date '0001-01-01' and date '9999-12-31' and ${table.dueDate} = ${table.endDate} - ${table.offsetDays}`),
+  check("warranty_reminder_status_check", sql`${table.status} in ('pending','processing','accepted','failed','uncertain','cancelled')`),
+  check("warranty_reminder_attempts_check", sql`${table.attempts} between 0 and 5 and ${table.recipientVersion} >= 1`),
+  check("warranty_reminder_identity_check", sql`${table.identity} ~ '^[0-9a-f]{64}$'`),
+  check("warranty_reminder_lease_check", sql`(${table.status} = 'processing' and ${table.claimToken} is not null and ${table.leaseUntil} is not null) or (${table.status} <> 'processing' and ${table.claimToken} is null and ${table.leaseUntil} is null)`),
+  check("warranty_reminder_accepted_check", sql`${table.status} <> 'accepted' or ${table.acceptedAt} is not null`),
 ]);
 
 export const receipt = pgTable("receipt", {
