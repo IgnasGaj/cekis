@@ -35,10 +35,13 @@ export function PurchaseForm({ initial, action, cancelHref, submissionKey, edit 
       inputMode={key === "price" ? "decimal" : undefined} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `${key}-error` : undefined} />
     {errors[key] && <p className="form-error" id={`${key}-error`}>{errors[key]}</p>}
   </div>;
-  return <form className="purchase-form" action={formAction} noValidate>
+  return <form className="purchase-form" action={formAction} onReset={(event) => event.preventDefault()} noValidate>
     {submissionKey && <input type="hidden" name="submissionKey" value={submissionKey} />}
     {revision && <input type="hidden" name="expectedRevision" value={revision} />}
-    {Object.keys(errors).length > 0 && <div ref={summary} tabIndex={-1} className="error-summary" role="alert">{errors.form ?? "Patikrink pažymėtus laukus ir bandyk dar kartą."}</div>}
+    {Object.keys(errors).length > 0 && <div ref={summary} tabIndex={-1} className="error-summary" role="alert">
+      {errors.form ?? "Patikrink pažymėtus laukus ir bandyk dar kartą."}
+      {state.existingPurchaseId && <p><a href={`/pirkiniai/${state.existingPurchaseId}`}>Peržiūrėti išsaugotą pirkinį</a> · <a href={`/pirkiniai/${state.existingPurchaseId}/redaguoti`}>Redaguoti išsaugotą pirkinį</a></p>}
+    </div>}
     <fieldset disabled={pending}>
       {field("productName")}{field("seller")}{field("purchaseDate", "date")}{field("price")}
       <div className="field"><label htmlFor="currency">{labels.currency}</label><select id="currency" name="currency" value={values.currency} onChange={(event) => change("currency", event.target.value)} aria-invalid={Boolean(errors.currency)} aria-describedby={errors.currency ? "currency-error" : undefined}>

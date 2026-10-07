@@ -210,8 +210,11 @@ test("vienas kūrimo raktas nesukuria dublikatų ir neatkuria ištrinto įrašo"
   await second.getByLabel("Pirkimo data").fill("2024-01-01");
   await second.locator('input[name="submissionKey"]').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, key);
   await second.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-  await expect(second).toHaveURL(new RegExp(`/pirkiniai/${id}`));
-  await expect(second.getByRole("heading", { name: "Pakeistas" })).toBeVisible();
+  await expect(second).toHaveURL(/\/pirkiniai\/naujas/);
+  await expect(second.getByText(/Pirkinys jau išsaugotas su kitais duomenimis/)).toBeVisible();
+  await expect(second.getByLabel("Prekės pavadinimas")).toHaveValue("Senas turinys");
+  await expect(second.getByRole("link", { name: "Peržiūrėti išsaugotą pirkinį" })).toHaveAttribute("href", `/pirkiniai/${id}`);
+  await expect(second.getByRole("link", { name: "Redaguoti išsaugotą pirkinį" })).toHaveAttribute("href", `/pirkiniai/${id}/redaguoti`);
   await first.getByRole("button", { name: "Ištrinti pirkinį" }).click();
   await first.getByRole("button", { name: "Ištrinti", exact: true }).click();
   await expect(first).toHaveURL(/\/pirkiniai\?busena=istrinta/);
@@ -227,6 +230,96 @@ test("vienas kūrimo raktas nesukuria dublikatų ir neatkuria ištrinto įrašo"
     expect(result.rows[0].total).toBe(1);
   });
   await context.close();
+});
+
+test("prarasto atsakymo pakartojimas lygina visus pirkinio ir garantijos duomenis", async ({ browser }) => {
+  const email = `retry-warranty-${Date.now()}@example.test`;
+  const context = await browser.newContext();
+  const savedPage = await context.newPage();
+  await signIn(savedPage, email);
+  await savedPage.goto("/pirkiniai/naujas");
+  const fill = async (page: Page, source: "date" | "duration" = "date") => {
+    await page.getByLabel("Prekės pavadinimas").fill("Garantijos bandymas");
+    await page.getByLabel("Pardavėjas").fill("Pardavėjas");
+    await page.getByLabel("Pirkimo data").fill("2024-01-01");
+    await page.getByLabel("Garantijos būsena").selectOption("known");
+    if (source === "duration") {
+      await page.getByLabel("Kaip nurodysi pabaigą?").selectOption("duration");
+      await page.getByLabel("Trukmė mėnesiais (1–600)").fill("48");
+    } else await page.getByLabel("Garantijos pabaigos data").fill("2028-01-01");
+    await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  };
+  await fill(savedPage);
+  const key = await savedPage.locator('input[name="submissionKey"]').inputValue();
+  const retained = await context.newPage();
+  await retained.goto("/pirkiniai/naujas");
+  await fill(retained);
+  await retained.locator('input[name="submissionKey"]').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, key);
+  let responseLost = false;
+  await savedPage.route("**/pirkiniai/naujas", async (route) => {
+    if (route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.continue();
+    const committed = await route.fetch();
+    expect(committed.status()).toBe(200);
+    responseLost = true;
+    await route.fulfill({ status: 503, contentType: "text/plain", body: "Atsakymas nutrūko." });
+  });
+  await savedPage.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect.poll(() => responseLost).toBe(true);
+  const id = await withAppDb(async (client) => {
+    const rows = await client.query("SELECT id FROM purchase WHERE submission_key=$1", [key]);
+    expect(rows.rows).toHaveLength(1);
+    return rows.rows[0].id as string;
+  });
+  await retained.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(retained).toHaveURL(new RegExp(`/pirkiniai/${id}`));
+
+  const retry = async (change: (page: Page) => Promise<void>) => {
+    await retained.goto("/pirkiniai/naujas");
+    await fill(retained);
+    await change(retained);
+    await retained.locator('input[name="submissionKey"]').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, key);
+    await retained.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+    await expect(retained).toHaveURL(/\/pirkiniai\/naujas/);
+    await expect(retained.getByText(/Pirkinys jau išsaugotas su kitais duomenimis/)).toBeVisible();
+    await expect(retained.getByRole("link", { name: "Peržiūrėti išsaugotą pirkinį" })).toHaveAttribute("href", `/pirkiniai/${id}`);
+  };
+  await retry(async (page) => {
+    await page.getByLabel("Garantijos pabaigos data").fill("2029-01-01");
+    await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  });
+  await expect(retained.getByLabel("Garantijos pabaigos data")).toHaveValue("2029-01-01");
+  await expect(retained.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  await retry(async (page) => { await page.getByLabel("Garantijos būsena").selectOption("none"); });
+  await expect(retained.getByLabel("Garantijos būsena")).toHaveValue("none");
+  await retry(async (page) => {
+    await page.getByLabel("Kaip nurodysi pabaigą?").selectOption("duration");
+    await page.getByLabel("Trukmė mėnesiais (1–600)").fill("48");
+    await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  });
+  await expect(retained.getByLabel("Trukmė mėnesiais (1–600)")).toHaveValue("48");
+  await retry(async (page) => { await page.getByLabel("Prekės pavadinimas").fill("Pakeistas pavadinimas"); });
+  await expect(retained.getByLabel("Prekės pavadinimas")).toHaveValue("Pakeistas pavadinimas");
+  await withAppDb(async (client) => {
+    const rows = await client.query("SELECT product_name,warranty_state,warranty_end_date::text,warranty_duration_months,warranty_source FROM purchase WHERE submission_key=$1", [key]);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]).toMatchObject({ product_name: "Garantijos bandymas", warranty_state: "known", warranty_end_date: "2028-01-01", warranty_duration_months: null, warranty_source: "date" });
+  });
+
+  const otherContext = await browser.newContext();
+  const other = await otherContext.newPage();
+  await signIn(other, `retry-other-${Date.now()}@example.test`);
+  await other.goto("/pirkiniai/naujas");
+  await fill(other);
+  await other.locator('input[name="submissionKey"]').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, key);
+  await other.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(other).toHaveURL(/\/pirkiniai\/[0-9a-f-]+/);
+  expect(new URL(other.url()).pathname).not.toBe(`/pirkiniai/${id}`);
+  await withAppDb(async (client) => {
+    const rows = await client.query("SELECT owner_id FROM purchase WHERE submission_key=$1", [key]);
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows[0].owner_id).not.toBe(rows.rows[1].owner_id);
+  });
+  await otherContext.close(); await context.close();
 });
 
 test("50 įrašų puslapiai nepaslepia likusių pirkinių", async ({ page }) => {

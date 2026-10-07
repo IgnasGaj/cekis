@@ -1,12 +1,12 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
-import { createPurchase, deletePurchase, isPurchaseId, updatePurchase } from "@/lib/purchases";
+import { createPurchase, deletePurchase, getPurchase, isPurchaseId, purchaseMatchesSubmitted, updatePurchase } from "@/lib/purchases";
 import { fieldsFromForm, parsePurchaseFields, type PurchaseErrors } from "@/lib/purchase-validation";
 import { requireSession } from "@/lib/session";
 import { parseWarranty, warrantyFromForm } from "@/lib/warranty";
 
-export type FormState = { errors: PurchaseErrors & { warranty?: string } };
+export type FormState = { errors: PurchaseErrors & { warranty?: string }; existingPurchaseId?: string };
 const failed: FormState = { errors: { form: "Nepavyko išsaugoti. Patikrink ryšį ir bandyk dar kartą." } };
 
 export async function createAction(_state: FormState, form: FormData): Promise<FormState> {
@@ -19,9 +19,16 @@ export async function createAction(_state: FormState, form: FormData): Promise<F
   const key = form.get("submissionKey");
   if (typeof key !== "string" || !isPurchaseId(key)) return { errors: { form: "Atnaujink puslapį ir bandyk dar kartą." } };
   let id: string | null;
-  try { id = await createPurchase(key, parsed.value, warranty?.value ?? undefined); }
+  let saved: Awaited<ReturnType<typeof getPurchase>>;
+  try {
+    id = await createPurchase(key, parsed.value, warranty?.value ?? undefined);
+    saved = id ? await getPurchase(id) : null;
+  }
   catch (error) { unstable_rethrow(error); return failed; }
   if (!id) return { errors: { form: "Šis įrašas jau ištrintas. Pridėk pirkinį iš naujo." } };
+  if (!saved) return { errors: { form: "Pirkinys nerastas. Atnaujink puslapį ir patikrink pirkinių sąrašą." } };
+  if (!purchaseMatchesSubmitted(saved, parsed.value, warranty?.value ?? undefined))
+    return { errors: { form: "Pirkinys jau išsaugotas su kitais duomenimis. Patikrink jį ir prireikus redaguok; ši forma liko nepakeista." }, existingPurchaseId: id };
   revalidatePath("/pirkiniai");
   redirect(`/pirkiniai/${id}?busena=issaugota`);
 }

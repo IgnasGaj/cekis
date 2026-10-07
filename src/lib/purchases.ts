@@ -5,7 +5,7 @@ import { purchase } from "./schema";
 import { requireSession } from "./session";
 import type { parsePurchaseFields } from "./purchase-validation";
 import { todayInVilnius } from "./purchase-validation";
-import type { WarrantyInput } from "./warranty";
+import { emptyWarranty, type WarrantyInput } from "./warranty";
 
 type Values = NonNullable<ReturnType<typeof parsePurchaseFields>["value"]>;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -62,6 +62,14 @@ export async function getPurchase(id: string) {
   if (!isPurchaseId(id)) return null;
   const [row] = await db.select().from(purchase).where(and(eq(purchase.id, id), eq(purchase.ownerId, user.id), isNull(purchase.deletedAt))).limit(1);
   return row ?? null;
+}
+
+export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<typeof getPurchase>>>, values: Values, warranty: WarrantyInput = emptyWarranty) {
+  return saved.productName === values.productName && saved.seller === values.seller &&
+    saved.purchaseDate === values.purchaseDate && saved.price === values.price &&
+    saved.currency === values.currency && saved.notes === values.notes &&
+    saved.warrantyState === warranty.warrantyState && saved.warrantyEndDate === warranty.warrantyEndDate &&
+    saved.warrantyDurationMonths === warranty.warrantyDurationMonths && saved.warrantySource === warranty.warrantySource;
 }
 
 export async function createPurchase(key: string, values: Values, warranty?: WarrantyInput) {
