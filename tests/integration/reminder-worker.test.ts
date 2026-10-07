@@ -31,7 +31,17 @@ afterEach(async()=>{ await pool.query(`TRUNCATE warranty_reminder,purchase,remin
 afterAll(async()=>{
   if (service) await (await import("../../src/lib/db")).pool.end();
   if (pool) await pool.end();
-  if (admin) { await admin.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`); await admin.end(); }
+  if (admin) {
+    try {
+      for (let attempt=0;attempt<20;attempt++) {
+        try { await admin.query(`DROP DATABASE IF EXISTS "${name}"`); break; }
+        catch (error) {
+          if ((error as {code?:string}).code!=="55006" || attempt===19) throw error;
+          await new Promise((resolve)=>setTimeout(resolve,100));
+        }
+      }
+    } finally { await admin.end(); }
+  }
 });
 
 async function purchase(endDate="2028-07-10") {
