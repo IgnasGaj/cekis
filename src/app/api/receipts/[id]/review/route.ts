@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { pool } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { isPurchaseId } from "@/lib/purchases";
@@ -58,6 +59,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await client.query("UPDATE receipt SET receipt_number=$1,updated_at=now() WHERE id=$2 AND owner_id=$3", [receiptNumber.trim() || null,id,session.user.id]);
     await reconcilePurchase(client,session.user.id,body.purchaseId);
     await client.query("COMMIT");
+    revalidatePath("/pradzia");
+    revalidatePath("/pirkiniai");
     return Response.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     await client.query("ROLLBACK").catch(() => {});

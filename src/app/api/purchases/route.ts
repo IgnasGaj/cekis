@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { getEnv } from "@/lib/env";
 import { createPurchase, getPurchase, isPurchaseId, purchaseMatchesSubmitted } from "@/lib/purchases";
 import { parsePurchaseFields } from "@/lib/purchase-validation";
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     const fields = { productName: saved.productName, seller: saved.seller, purchaseDate: saved.purchaseDate,
       price: saved.price ?? "", currency: saved.currency ?? "EUR", notes: saved.notes ?? "" };
     const matchesSubmitted = purchaseMatchesSubmitted(saved, parsed.value, warranty?.value ?? undefined);
+    if (matchesSubmitted) { revalidatePath("/pradzia"); revalidatePath("/pirkiniai"); }
     return Response.json({ id, fields, matchesSubmitted }, { headers: { "Cache-Control": "private, no-store" } });
   } catch { return Response.json({ error: "Pirkinio išsaugoti nepavyko. Bandyk dar kartą." }, { status: 503 }); }
 }

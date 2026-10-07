@@ -1,4 +1,5 @@
 import "server-only";
+import { headers } from "next/headers";
 import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { db, pool } from "./db";
 import { purchase } from "./schema";
@@ -15,10 +16,37 @@ export const isPurchaseId = (id: string) => uuid.test(id);
 export function listParams(input: { q?: string; sort?: string; page?: string; warranty?: string }) {
   const q = (input.q ?? "").trim().slice(0, 200);
   const sort = input.sort === "oldest" || input.sort === "expiry" ? input.sort : "newest" as const;
-  const warranty = ["valid", "soon", "expired", "unknown", "none"].includes(input.warranty ?? "") ? input.warranty as "valid" | "soon" | "expired" | "unknown" | "none" : "all" as const;
+  const warranty = ["valid", "soon", "upcoming90", "expired", "unknown", "none"].includes(input.warranty ?? "") ? input.warranty as "valid" | "soon" | "upcoming90" | "expired" | "unknown" | "none" : "all" as const;
   const requestedPage = /^\d+$/.test(input.page ?? "") ? Number(input.page) : 1;
   const page = Number.isSafeInteger(requestedPage) && requestedPage >= 1 && requestedPage <= Math.floor(2147483647 / 50) ? requestedPage : 1;
   return { q, sort, warranty, page };
+}
+
+function upcomingWhere(today: string, days: 30 | 90) {
+  return and(eq(purchase.warrantyState, "known"), sql`${purchase.warrantyEndDate} between ${today}::date and (${today}::date + ${days}::integer)`);
+}
+
+export async function homePurchases() {
+  const { user } = await requireSession();
+  if (process.env.CEKIS_TEST_WORKER === "true" && (await headers()).get("x-cekis-test-home-failure") === "1")
+    throw new Error("Disposable home retrieval failure");
+  const today = todayInVilnius();
+  const ownerWhere = and(eq(purchase.ownerId, user.id), isNull(purchase.deletedAt));
+  const upcoming = and(ownerWhere, upcomingWhere(today, 90));
+  return db.transaction(async (tx) => {
+    const [totals] = await tx.select({
+      purchases: count(),
+      next30: sql<number>`count(*) filter (where ${upcomingWhere(today, 30)})::integer`,
+      next90: sql<number>`count(*) filter (where ${upcomingWhere(today, 90)})::integer`,
+    }).from(purchase).where(ownerWhere);
+    const upcomingRows = await tx.select({ id: purchase.id, productName: purchase.productName, seller: purchase.seller,
+      warrantyEndDate: purchase.warrantyEndDate }).from(purchase).where(upcoming)
+      .orderBy(asc(purchase.warrantyEndDate), desc(purchase.createdAt), desc(purchase.id)).limit(5);
+    const recentRows = await tx.select({ id: purchase.id, productName: purchase.productName, seller: purchase.seller,
+      purchaseDate: purchase.purchaseDate, warrantyState: purchase.warrantyState, warrantyEndDate: purchase.warrantyEndDate })
+      .from(purchase).where(ownerWhere).orderBy(desc(purchase.createdAt), desc(purchase.id)).limit(5);
+    return { today, totals, upcomingRows, recentRows };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export function listHref(params: ReturnType<typeof listParams>) {
@@ -36,10 +64,10 @@ export async function listPurchases(params: ReturnType<typeof listParams>) {
   // Backslashes escape LIKE's wildcard symbols, so a typed % or _ stays literal.
   const escaped = params.q.replace(/[\\%_]/g, (character) => `\\${character}`);
   const pattern = `%${escaped}%`;
-  const tomorrowWindow = sql`(${today}::date + 30)`;
   const warrantyWhere = params.warranty === "unknown" || params.warranty === "none" ? eq(purchase.warrantyState, params.warranty)
     : params.warranty === "valid" ? and(eq(purchase.warrantyState, "known"), sql`${purchase.warrantyEndDate} >= ${today}::date`)
-    : params.warranty === "soon" ? and(eq(purchase.warrantyState, "known"), sql`${purchase.warrantyEndDate} between ${today}::date and ${tomorrowWindow}`)
+    : params.warranty === "soon" ? upcomingWhere(today, 30)
+    : params.warranty === "upcoming90" ? upcomingWhere(today, 90)
     : params.warranty === "expired" ? and(eq(purchase.warrantyState, "known"), sql`${purchase.warrantyEndDate} < ${today}::date`) : undefined;
   const where = and(eq(purchase.ownerId, user.id), isNull(purchase.deletedAt), warrantyWhere,
     params.q ? or(sql`${purchase.productName} ILIKE ${pattern} ESCAPE '\\'`, sql`${purchase.seller} ILIKE ${pattern} ESCAPE '\\'`) : undefined);

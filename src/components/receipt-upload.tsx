@@ -121,6 +121,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
       await sendReceipt(file,id!,uploadKey,abort.signal);
       if (!current()) return;
       router.push(`/pirkiniai/${id}?busena=cekis-pridetas`);
+      router.refresh();
     } catch (error) { if (current()) setMessage(`${savedPurchaseId ? "Pirkinys išsaugotas. " : ""}${error instanceof Error ? error.message : "Įkelti nepavyko. Bandyk dar kartą."}`); }
     finally { if (operation.current === attempt) { controller.current = null; saving.current = false; setBusy(false); } }
   };

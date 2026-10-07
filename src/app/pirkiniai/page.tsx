@@ -28,7 +28,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
       <label htmlFor="purchase-search">Ieškoti pagal prekę arba pardavėją</label>
       <input id="purchase-search" name="q" maxLength={200} defaultValue={params.q} type="search" />
       <label htmlFor="purchase-warranty">Garantijos filtras</label>
-      <select id="purchase-warranty" name="warranty" defaultValue={params.warranty}><option value="all">Visi</option><option value="valid">Galioja</option><option value="soon">Greitai baigsis</option><option value="expired">Pasibaigė</option><option value="unknown">Garantija nenurodyta</option><option value="none">Pažymėta: garantijos nėra</option></select>
+      <select id="purchase-warranty" name="warranty" defaultValue={params.warranty}><option value="all">Visi</option><option value="valid">Galioja</option><option value="expired">Pasibaigė</option><option value="soon">Per artimiausias 30 dienų</option><option value="upcoming90">Per artimiausias 90 dienų</option><option value="unknown">Garantija nenurodyta</option><option value="none">Pažymėta: garantijos nėra</option></select>
       <label htmlFor="purchase-sort">Rikiuoti pirkinius</label>
       <select id="purchase-sort" name="sort" defaultValue={params.sort}><option value="newest">Naujausi pirmiausia</option><option value="oldest">Seniausi pirmiausia</option><option value="expiry">Pagal artimiausią garantijos pabaigą</option></select>
       <button className="filter-button" type="submit">Rodyti</button>

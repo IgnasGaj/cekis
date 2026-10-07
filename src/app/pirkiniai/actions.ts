@@ -30,6 +30,7 @@ export async function createAction(_state: FormState, form: FormData): Promise<F
   if (!purchaseMatchesSubmitted(saved, parsed.value, warranty?.value ?? undefined))
     return { errors: { form: "Pirkinys jau išsaugotas su kitais duomenimis. Patikrink jį ir prireikus redaguok; ši forma liko nepakeista." }, existingPurchaseId: id };
   revalidatePath("/pirkiniai");
+  revalidatePath("/pradzia");
   redirect(`/pirkiniai/${id}?busena=issaugota`);
 }
 
@@ -47,6 +48,7 @@ export async function editAction(id: string, context: string, _state: FormState,
   catch (error) { unstable_rethrow(error); return failed; }
   if (updated !== "updated") return { errors: { form: updated === "missing" ? "Pirkinys nerastas." : updated === "review" ? "Pasikeitė pirkimo data. Patvirtink garantijos pabaigą." : "Pirkinys pasikeitė kitur. Atnaujink puslapį, peržiūrėk pakeitimus ir bandyk dar kartą." } };
   revalidatePath("/pirkiniai");
+  revalidatePath("/pradzia");
   revalidatePath(`/pirkiniai/${id}`);
   redirect(`/pirkiniai/${id}?${context ? `${context}&` : ""}busena=atnaujinta`);
 }
@@ -59,6 +61,7 @@ export async function deleteAction(id: string, context: string, state: { error: 
   catch (error) { unstable_rethrow(error); return { error: "Nepavyko ištrinti. Bandyk dar kartą." }; }
   if (!deleted) return { error: "Pirkinys nerastas" };
   revalidatePath("/pirkiniai");
+  revalidatePath("/pradzia");
   revalidatePath(`/pirkiniai/${id}`);
   redirect(`/pirkiniai?${context ? `${context}&` : ""}busena=istrinta`);
 }
