@@ -16,6 +16,7 @@ const currency = (line: string) => {
   return [...new Set(found)].length === 1 ? found[0] : "";
 };
 const forbiddenSeller = /(?:\d{3,}|@|www\.|https?:|pvm|vat|kodas|kasinink|kasos|čekis|kvitas|receipt|invoice|viso|total|suma|\btel\.?|gatv| g\.|pr\.|st\.|str\.|\bLT-\d)/i;
+export const hasModelCode = (value: string) => /\b(?=[A-Z0-9-]{5,}\b)(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9-]*\b/.test(value);
 const totalLabel = /^(?:mok[ėe]ti(?:\s+suapvalinus)?|i[šs]\s*viso|viso\s*mokėti|mokėtina|bendra\s*suma|total|amount\s*due)\b/i;
 const numberLabel = /(?:(?:(?:č|c)ekio|kvito|dokumento|receipt|invoice)\s*(?:nr\.?|numeris|number|no\.?)|(?:nr\.?|no\.?)\s*(?:(?:č|c)ekio|kvito|receipt))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-/]{2,29})/i;
 const datePattern = /(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)|(?<!\d)(\d{1,2})[-./](\d{1,2})[-./](\d{4})(?!\d)/g;

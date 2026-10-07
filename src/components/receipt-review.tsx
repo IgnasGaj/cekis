@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { scanReceipt } from "@/lib/scan-receipt";
-import { type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
+import { hasModelCode, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import type { PurchaseFields, PurchaseErrors } from "@/lib/purchase-validation";
 import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
 import type { WarrantyInput } from "@/lib/warranty";
@@ -95,7 +95,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     <input id={`review-${key}`} type={key === "purchaseDate" ? "date" : "text"} value={values[key]} onChange={(event) => setField(key, event.target.value)}
       max={key === "purchaseDate" ? maxDate : undefined} maxLength={key === "productName" || key === "seller" ? 200 : 20}
       inputMode={key === "price" ? "decimal" : undefined} aria-invalid={Boolean(errors[key])} />
-    {hint(key)}{errors[key] && <p className="form-error">{errors[key]}</p>}
+    {hint(key)}{key === "productName" && suggestions?.productName.value && hasModelCode(suggestions.productName.value) && <p className="ocr-uncertain">Modelio kodą sutikrink su čekiu: panašūs simboliai gali būti atpažinti klaidingai.</p>}{errors[key] && <p className="form-error">{errors[key]}</p>}
   </div>;
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (savingRef.current) return;

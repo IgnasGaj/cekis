@@ -7,7 +7,7 @@ import { todayInVilnius } from "@/lib/purchase-validation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
 import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
 import { ReceiptScanControls, useReceiptScan } from "./receipt-scan";
-import type { ReceiptSuggestions } from "@/lib/ocr-parser";
+import { hasModelCode, type ReceiptSuggestions } from "@/lib/ocr-parser";
 import { emptyWarranty } from "@/lib/warranty";
 
 const limit = 10485760;
@@ -176,6 +176,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
       {(Object.keys(labels) as (keyof PurchaseFields)[]).map((name) => <div className="field" key={name}><label htmlFor={`receipt-${name}`}>{labels[name]}</label>
         {name === "currency" ? <select id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} onChange={(event) => changeField(name, event.target.value)}><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option></select> : name === "notes" ? <textarea id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} maxLength={2000} onChange={(event) => changeField(name, event.target.value)} /> : <input id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} type={name === "purchaseDate" ? "date" : "text"} max={name === "purchaseDate" ? maxDate : undefined} maxLength={name === "productName" || name === "seller" ? 200 : undefined} value={values[name]} onChange={(event) => changeField(name, event.target.value)} />}
         {name !== "currency" && name !== "notes" && suggestions?.[name === "price" ? "productPrice" : name]?.state === "uncertain" && <p className="ocr-uncertain">Patikrink šį lauką čekyje: nuskaitymas nėra patikimas.</p>}
+        {name === "productName" && hasModelCode(values.productName) && <p className="ocr-uncertain">Modelio kodą sutikrink su čekiu: panašūs simboliai gali būti atpažinti klaidingai.</p>}
       </div>)}
       <div className="field"><label htmlFor="receipt-number">Čekio numeris (neprivaloma)</label><input id="receipt-number" disabled={busy || Boolean(purchaseId)} value={number} maxLength={100} onChange={(event) => { numberEdited.current = true; setNumber(event.target.value); }} /></div>
       {!purchaseId && <fieldset disabled={busy}><WarrantyEditor value={warranty} onChange={setWarranty} purchaseDate={values.purchaseDate} initialPurchaseDate="" initialKnown={false} fields={false} /></fieldset>}

@@ -813,6 +813,7 @@ test("prie esamo pirkinio pridėto čekio nuskaitymo pasiūlymai išlieka perži
   await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
   await expect(page.getByText("Nuskaityta. Peržiūrėk pasiūlymus.")).toBeVisible();
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("Patvirtintas pirkinys");
+  await expect(page.getByText(/Modelio kodą sutikrink su čekiu/)).toBeVisible();
   await expect(page.getByText("UAB Bandymų prekyba")).toBeVisible();
   const price = page.getByLabel("Prekės kaina (neprivaloma)");
   await expect(price).toHaveValue("");
@@ -836,6 +837,7 @@ test("naujas čekis nuskaitomas prieš sukuriant pirkinį ir išsaugomas origina
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("UAB Bandymų prekyba");
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue(/Prietaisas.*bandomasis įrenginys/);
+  await expect(page.getByText(/Modelio kodą sutikrink su čekiu/)).toBeVisible();
   await expect(page.getByLabel("Pirkimo data", { exact: true })).toHaveValue("2024-01-30");
   await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("19.99");
   await expect(page.getByText(/Čekio suma: 20.00/)).toBeVisible();
