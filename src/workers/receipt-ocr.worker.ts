@@ -1,4 +1,4 @@
-import { createWorker } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 
 // Track the nested Tesseract worker so cancellation also stops language loading.
 const NativeWorker = self.Worker;
@@ -20,6 +20,7 @@ self.onmessage = async (event: MessageEvent<{ type: "start"; bytes?: ArrayBuffer
     });
     if (cancelled) { await worker.terminate(); return; }
     try {
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, preserve_interword_spaces: "1" });
       const result = await worker.recognize(new Blob([event.data.bytes]));
       if (!cancelled) self.postMessage({ type: "done", text: result.data.text });
     } finally { await worker.terminate(); }

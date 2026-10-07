@@ -2,7 +2,8 @@
 /* eslint-disable @next/next/no-img-element -- Private authenticated receipt content is served without a public image URL. */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parseReceiptText, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
+import { scanReceipt } from "@/lib/scan-receipt";
+import { type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import type { PurchaseFields, PurchaseErrors } from "@/lib/purchase-validation";
 import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
 import type { WarrantyInput } from "@/lib/warranty";
@@ -54,23 +55,11 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
       const response = await fetch(`/api/receipts/${receiptId}/content`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error(response.status === 401 ? "Sesija baigėsi. Prisijunk iš naujo." : response.status === 404 ? "Čekis neberastas. Grįžk į pirkinį." : "Čekio atverti nepavyko. Bandyk dar kartą.");
       if (!response.headers.get("content-type")?.startsWith("image/")) throw new Error("Šio dokumento automatiškai nuskaityti negalima.");
-      const bytes = await response.arrayBuffer();
+      const parsed = await scanReceipt(await response.blob(), maxDate, controller.signal, (value) => {
+        if (mounted.current && active.current?.id === id) setProgress(value);
+      });
       if (!mounted.current || active.current?.id !== id) return;
-      const worker = new Worker(new URL("../workers/receipt-ocr.worker.ts", import.meta.url), { type: "module" });
-      active.current.worker = worker;
-      worker.onmessage = (event: MessageEvent<{ type: string; text?: string; progress?: number }>) => {
-        if (!mounted.current || active.current?.id !== id) return;
-        if (event.data.type === "progress") setProgress(Math.max(0, Math.min(100, Math.round((event.data.progress ?? 0) * 100))));
-        if (event.data.type === "done") {
-          const parsed = parseReceiptText(event.data.text ?? "", maxDate);
-          setSuggestions(parsed);
-          setState((event.data.text ?? "").trim() ? "ready" : "empty");
-          worker.terminate(); active.current = null;
-        }
-        if (event.data.type === "error") { setState("failed"); setError("Nepavyko nuskaityti čekio. Gali bandyti dar kartą arba įvesti rankiniu būdu."); worker.terminate(); active.current = null; }
-      };
-      worker.onerror = () => { if (!mounted.current || active.current?.id !== id) return; setState("failed"); setError("Nuskaitymo modulis nepasiekiamas. Bandyk dar kartą arba įvesk rankiniu būdu."); worker.terminate(); active.current = null; };
-      worker.postMessage({ type: "start", bytes }, [bytes]);
+      setSuggestions(parsed); setState(Object.values(parsed).some((field) => field.value) ? "ready" : "empty"); active.current = null;
     } catch (cause) {
       if (!mounted.current || active.current?.id !== id) return;
       setState("failed"); setError(cause instanceof Error ? cause.message : "Nepavyko nuskaityti čekio."); active.current?.worker?.terminate(); active.current = null;

@@ -32,6 +32,9 @@ export async function POST(request: Request) {
   if (!session) return json("Prisijunk ir bandyk dar kartą.", 401);
   const key = request.headers.get("x-submission-key") ?? "";
   const purchaseId = request.headers.get("x-purchase-id") ?? "";
+  let receiptNumber = "";
+  try { receiptNumber = decodeURIComponent(request.headers.get("x-receipt-number") ?? "").trim(); } catch { return json("Čekio numeris netinkamas.", 400); }
+  if (receiptNumber.length > 100 || /[\u0000-\u001f\u007f]/.test(receiptNumber)) return json("Čekio numeris netinkamas.", 400);
   if (!uuid.test(key) || !uuid.test(purchaseId)) return json("Pirkinys nerastas.", 404);
   const db = await pool.connect().catch(() => null);
   if (!db) return json("Paslauga laikinai nepasiekiama. Bandyk dar kartą.", 503);
@@ -71,9 +74,9 @@ export async function POST(request: Request) {
       file = await validateReceipt(bytes, request.headers.get("content-type") ?? "", decodeURIComponent(request.headers.get("x-file-name") ?? "cekis"));
     } catch (error) { await db.query("ROLLBACK"); return json(error instanceof ReceiptInputError ? error.message : "Failo nuskaityti nepavyko.", 400); }
     const id = randomUUID(); const objectKey = `originals/${randomUUID()}`;
-    await db.query(`INSERT INTO receipt (id,owner_id,submission_key,target_purchase_id,object_key,filename,content_type,byte_size,sha256,state,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',now()+interval '1 hour') ON CONFLICT (owner_id,submission_key) DO NOTHING`,
-      [id,session.user.id,key,purchaseId,objectKey,file.filename,file.contentType,file.byteSize,file.sha256]);
+    await db.query(`INSERT INTO receipt (id,owner_id,submission_key,target_purchase_id,object_key,filename,content_type,byte_size,sha256,state,expires_at,receipt_number)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',now()+interval '1 hour',$10) ON CONFLICT (owner_id,submission_key) DO NOTHING`,
+      [id,session.user.id,key,purchaseId,objectKey,file.filename,file.contentType,file.byteSize,file.sha256,receiptNumber || null]);
     const found = await db.query("SELECT * FROM receipt WHERE owner_id=$1 AND submission_key=$2 FOR UPDATE", [session.user.id,key]);
     const row = found.rows[0];
     if (row.target_purchase_id !== purchaseId || row.sha256 !== file.sha256 || row.byte_size !== file.byteSize || row.content_type !== file.contentType) {

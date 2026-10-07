@@ -789,3 +789,52 @@ test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", asy
     expect(result.rows[0]).toMatchObject({ product_name: "Naujesnis įrašas", warranty_state: "known", warranty_end_date: "2028-01-01" });
   });
 });
+
+// Anonymous generated photo-style fixture; the owner's real receipt stays out of git.
+async function anonymousReceiptPhoto() {
+  const lines = ["UAB Bandymų prekyba", "TEST60420 Prietaisas", "bandomasis įrenginys 19,99 A", "Mokėti 19,99", "Apvalinimo suma 0,01", "Mokėti suapvalinus 20,00", "Grynaisiais 20,00", "Kvito Nr. 1/1/12345", "2024-01-30 12:41:21", "Kvito numeris 12345"];
+  const image = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1500"><defs><pattern id="texture" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="#70644d"/><path d="M0 8h24M8 0v24" stroke="#ae9974" stroke-width="3"/></pattern></defs><rect width="100%" height="100%" fill="url(#texture)"/><rect x="170" y="100" width="660" height="1290" fill="#eeeeeb"/><g font-family="DejaVu Sans" font-size="28" fill="#333333">${lines.map((line, index) => `<text x="205" y="${200 + index * 92}">${line}</text>`).join("")}</g></svg>`;
+  return sharp(Buffer.from(image)).jpeg({ quality: 90 }).toBuffer();
+}
+
+test("naujas čekis nuskaitomas prieš sukuriant pirkinį ir išsaugomas originalas", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `new-ocr-${randomUUID()}@example.test`);
+  await page.goto("/prideti");
+  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("UAB Bandymų prekyba");
+  await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue(/Prietaisas.*bandomasis įrenginys/);
+  await expect(page.getByLabel("Pirkimo data", { exact: true })).toHaveValue("2024-01-30");
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("19.99");
+  await expect(page.getByText(/Čekio suma: 20.00/)).toBeVisible();
+  await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("1/1/12345");
+  // Owner review corrects any OCR model-character error before committing.
+  await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("TEST60420 Prietaisas bandomasis įrenginys");
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
+  const purchaseId = new URL(page.url()).pathname.split("/").pop()!;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "TEST60420 Prietaisas bandomasis įrenginys" })).toBeVisible();
+  const row = await db(async (client) => (await client.query("SELECT r.id,r.receipt_number,p.price FROM receipt r JOIN purchase p ON p.id=r.target_purchase_id WHERE p.id=$1 AND r.state='ready'", [purchaseId])).rows[0]);
+  expect(row).toMatchObject({ receipt_number: "1/1/12345", price: "19.99" });
+  expect(sha(await (await page.request.get(`/api/receipts/${row.id}/content`)).body())).toBe(sha(await anonymousReceiptPhoto()));
+});
+
+test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitimas atmeta seną rezultatą", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `new-ocr-cancel-${randomUUID()}@example.test`);
+  await page.goto("/prideti");
+  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
+  await page.getByLabel("Pardavėjas", { exact: true }).fill("Mano patikrintas pardavėjas");
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("Mano patikrintas pardavėjas");
+  await page.getByRole("button", { name: "Bandyti nuskaityti dar kartą" }).click();
+  await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
+  await expect(page.getByText("Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu.")).toBeVisible();
+  const pdf = await PDFDocument.create(); pdf.addPage([200, 200]);
+  await page.getByLabel("Įkelti PDF", { exact: true }).setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await expect(page.getByText("PDF automatinis nuskaitymas neprieinamas. Įvesk duomenis rankiniu būdu.")).toBeVisible();
+  await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("");
+});
