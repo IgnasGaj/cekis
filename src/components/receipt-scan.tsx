@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { scanReceipt } from "@/lib/scan-receipt";
-import type { ReceiptSuggestions } from "@/lib/ocr-parser";
+import { suggestionValues, type ReceiptSuggestions } from "@/lib/ocr-parser";
 
 export function useReceiptScan(today: string, onResult: (suggestions: ReceiptSuggestions) => void) {
   const [state, setState] = useState("idle"); const [progress, setProgress] = useState(0); const [error, setError] = useState("");
@@ -17,7 +17,7 @@ export function useReceiptScan(today: string, onResult: (suggestions: ReceiptSug
       const suggestions = await scanReceipt(file, today, controller.signal, (value) => { if (sequence.current === id) setProgress(value); });
       if (sequence.current !== id) return;
       result.current(suggestions);
-      setState(Object.values(suggestions).some((field) => field.value) ? "ready" : "empty");
+      setState(Object.values(suggestions).some((field) => suggestionValues(field).length) ? "ready" : "empty");
     } catch (cause) { if (sequence.current === id && !controller.signal.aborted) { setState("failed"); setError(cause instanceof Error ? cause.message : "Nepavyko nuskaityti čekio."); } }
     finally { if (sequence.current === id) active.current = null; }
   }, [today]);

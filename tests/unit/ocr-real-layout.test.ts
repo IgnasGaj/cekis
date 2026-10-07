@@ -28,6 +28,23 @@ Kvito numeris 12345`, "2026-10-07");
 });
 it("never uses payment or VAT rows as products, or a multi-item total as product price", () => {
   const result = parseReceiptText("Pienas 2,30 A\nDuona 1,40 B\nMokėti 3,70\nGrynaisiais 3,70\nPVM suma 0,64", "2026-10-07");
-  expect(result.productName.state).toBe("uncertain"); expect(result.productPrice.state).toBe("absent");
+  expect(result.productName.state).toBe("uncertain");
+  expect(result.productPrice).toEqual({ value: "", state: "uncertain", candidates: ["2.30", "1.40"] });
   expect(result.receiptTotal.value).toBe("3.70");
+});
+it("keeps a wrapped model and an amount-only VAT row as reviewable candidates", () => {
+  const result = parseReceiptText(`Pavyzdžio salonas
+UAB „Bandymų technika“
+Bandymų g. 3
+TEST60420CK
+Bandymų indukcinė kaitlentė
+179,49 A
+Mokėti 179,49
+Mokėti suapvalinus 179,50
+Kvito Nr. 3/4/12345
+2024-01-30 12:41`, "2026-10-07");
+  expect(result.seller).toEqual({ value: "UAB Bandymų technika", state: "strong" });
+  expect(result.productName).toEqual({ value: "TEST60420CK Bandymų indukcinė kaitlentė", state: "uncertain" });
+  expect(result.productPrice).toEqual({ value: "179.49", state: "uncertain" });
+  expect(result.receiptTotal.value).toBe("179.50");
 });

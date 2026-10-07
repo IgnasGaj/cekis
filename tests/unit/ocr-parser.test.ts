@@ -21,7 +21,7 @@ describe("conservative receipt parser", () => {
     expect(parse("Data: 2026-10-07").purchaseDate.state).toBe("absent");
   });
   it("does not choose between two dates", () => {
-    expect(parse("Data 2026-10-05\nData 2026-10-06").purchaseDate).toEqual({ value: "", state: "uncertain" });
+    expect(parse("Data 2026-10-05\nData 2026-10-06").purchaseDate).toEqual({ value: "", state: "uncertain", candidates: ["2026-10-05", "2026-10-06"] });
   });
   it("handles comma and point totals, but never invents currency", () => {
     expect(parse("Iš viso 12,30").receiptTotal.value).toBe("12.30");
@@ -36,7 +36,7 @@ describe("conservative receipt parser", () => {
   });
   it("leaves multiple product lines ambiguous", () => {
     const result = parse("Obuoliai 2,30\nPienas 1,40\nIš viso 3,70 €");
-    expect(result.productName).toEqual({ value: "", state: "uncertain" });
+    expect(result.productName).toEqual({ value: "", state: "uncertain", candidates: ["Obuoliai", "Pienas"] });
     expect(result.receiptTotal.value).toBe("3.70");
   });
   it("does not turn noisy or blank OCR into confident values", () => {

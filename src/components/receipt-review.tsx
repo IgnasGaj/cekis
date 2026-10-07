@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { scanReceipt } from "@/lib/scan-receipt";
-import { hasModelCode, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
+import { hasModelCode, suggestionValues, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import type { PurchaseFields, PurchaseErrors } from "@/lib/purchase-validation";
 import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
 import type { WarrantyInput } from "@/lib/warranty";
@@ -86,9 +86,10 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
   const hint = (key: "productName" | "seller" | "purchaseDate" | "receiptNumber" | "price") => {
     const suggestion = key === "price" ? suggestions?.productPrice : suggestions?.[key];
     if (!suggestion || suggestion.state === "absent") return null;
-    if (!suggestion.value) return <p className="ocr-uncertain">Rasti keli galimi variantai. Patikrink čekį ir įvesk pats.</p>;
-    return <div className="ocr-suggestion"><span>{suggestion.state === "uncertain" ? "Patikrink šį lauką: " : "Siūloma: "}<strong>{suggestion.value}</strong></span>
-      <button type="button" onClick={() => key === "receiptNumber" ? setNumber(suggestion.value) : setField(key, suggestion.value)}>Pritaikyti pasiūlymą</button></div>;
+    const options = suggestionValues(suggestion);
+    if (!options.length) return <p className="ocr-uncertain">Nuskaitymas neaiškus. Patikrink čekį ir įvesk pats.</p>;
+    return <div className="ocr-suggestion"><span>{suggestion.state === "uncertain" ? "Galimi nuskaitymo variantai – patikrink čekį: " : "Siūloma: "}</span>
+      {options.map((option) => <span key={option}><strong>{option}</strong><button type="button" onClick={() => key === "receiptNumber" ? setNumber(option) : setField(key, option)}>Pritaikyti pasiūlymą</button></span>)}</div>;
   };
   const field = (key: "productName" | "seller" | "purchaseDate" | "price") => <div className="field" key={key}>
     <label htmlFor={`review-${key}`}>{labels[key]}</label>

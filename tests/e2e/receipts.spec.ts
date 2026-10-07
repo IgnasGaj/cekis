@@ -803,6 +803,53 @@ async function anonymousReceiptPhoto() {
   return sharp(Buffer.from(image)).jpeg({ quality: 90 }).toBuffer();
 }
 
+async function wrappedReceiptPhoto() {
+  const lines = ["Pavyzdžio salonas", "UAB Bandymų technika", "TEST60420CK", "Bandymų indukcinė kaitlentė", "179,49 A", "Mokėti 179,49", "Mokėti suapvalinus 179,50", "Kvito Nr. 3/4/12345", "2024-01-30 12:41"];
+  const image = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1500"><rect width="100%" height="100%" fill="#645c4c"/><rect x="130" y="80" width="740" height="1340" fill="#eeeae1"/><g font-family="DejaVu Sans" font-size="32" fill="#303030">${lines.map((line, index) => `<text x="180" y="${180 + index * 115}">${line}</text>`).join("")}</g></svg>`;
+  return sharp(Buffer.from(image)).jpeg({ quality: 84 }).toBuffer();
+}
+
+test("suvyniota prekė ir atskira PVM kainos eilutė pasiekia naujo pirkinio formą", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `wrapped-ocr-${randomUUID()}@example.test`);
+  await page.goto("/prideti");
+  const photo = await wrappedReceiptPhoto();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "fictional-wrapped.jpeg", mimeType: "image/jpeg", buffer: photo });
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("UAB Bandymų technika");
+  await expect(page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas", { exact: true }) })).toContainText("indukcinė kaitlentė");
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("179.49");
+  await expect(page.getByText(/Čekio suma: 179.50/)).toBeVisible();
+  await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("TEST60420CK Bandymų indukcinė kaitlentė");
+  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
+  const purchaseId = new URL(page.url()).pathname.split("/").pop()!;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "TEST60420CK Bandymų indukcinė kaitlentė" })).toBeVisible();
+  const saved = await db(async (client) => (await client.query("SELECT p.price,r.id FROM purchase p JOIN receipt r ON r.target_purchase_id=p.id WHERE p.id=$1 AND r.state='ready'", [purchaseId])).rows[0]);
+  expect(saved.price).toBe("179.49");
+  expect(sha(await (await page.request.get(`/api/receipts/${saved.id}/content`)).body())).toBe(sha(photo));
+});
+
+test("kelių prekių OCR variantai rodomi naujo pirkinio peržiūroje", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `ambiguous-ocr-${randomUUID()}@example.test`);
+  await page.goto("/prideti");
+  const lines = ["UAB Bandymų prekyba", "Bandymų puodelis 17,49 A", "Bandymų lėkštė 29,99 B", "Mokėti 47,48", "Kvito Nr. 3/4/54321", "2024-01-30 12:41"];
+  const image = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><rect width="100%" height="100%" fill="#5d5345"/><rect x="100" y="60" width="700" height="1080" fill="#f2f0e9"/><g font-family="DejaVu Sans" font-size="34" fill="#242424">${lines.map((line, index) => `<text x="145" y="${150 + index * 145}">${line}</text>`).join("")}</g></svg>`;
+  const photo = await sharp(Buffer.from(image)).jpeg({ quality: 88 }).toBuffer();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "fictional-multiple.jpeg", mimeType: "image/jpeg", buffer: photo });
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("");
+  await expect(page.getByRole("button", { name: "17.49", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "29.99", exact: true })).toBeVisible();
+  await expect(page.getByText(/Čekio suma: 47.48/)).toBeVisible();
+  await page.getByRole("button", { name: "17.49", exact: true }).click();
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("17.49");
+});
+
 test("prie esamo pirkinio pridėto čekio nuskaitymo pasiūlymai išlieka peržiūroje", async ({ page }) => {
   test.setTimeout(120000);
   await signIn(page, `existing-ocr-${randomUUID()}@example.test`);
@@ -863,8 +910,12 @@ test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitim
   await page.goto("/prideti");
   await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
   await page.getByLabel("Pardavėjas", { exact: true }).fill("Mano patikrintas pardavėjas");
+  await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("Mano patikrinta prekė");
+  await page.getByLabel("Kaina (neprivaloma)", { exact: true }).fill("18.75");
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("Mano patikrintas pardavėjas");
+  await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("Mano patikrinta prekė");
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("18.75");
   await page.getByRole("button", { name: "Bandyti nuskaityti dar kartą" }).click();
   await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
   await expect(page.getByText("Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu.")).toBeVisible();

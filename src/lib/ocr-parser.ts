@@ -1,11 +1,12 @@
 import { validPurchaseDate } from "./purchase-validation";
 
-export type Suggestion = { value: string; state: "strong" | "uncertain" | "absent" };
+export type Suggestion = { value: string; state: "strong" | "uncertain" | "absent"; candidates?: string[] };
 export type ReceiptSuggestions = { seller: Suggestion; purchaseDate: Suggestion; receiptTotal: Suggestion; receiptCurrency: Suggestion; receiptNumber: Suggestion; productName: Suggestion; productPrice: Suggestion };
 const absent = (): Suggestion => ({ value: "", state: "absent" });
+export const suggestionValues = (suggestion: Suggestion): string[] => [...new Set([suggestion.value, ...(suggestion.candidates ?? [])].filter(Boolean))];
 const pick = (values: string[], strong: boolean): Suggestion => {
   const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-  return unique.length === 1 ? { value: unique[0], state: strong ? "strong" : "uncertain" } : unique.length > 1 ? { value: "", state: "uncertain" } : absent();
+  return unique.length === 1 ? { value: unique[0], state: strong ? "strong" : "uncertain" } : unique.length > 1 ? { value: "", state: "uncertain", candidates: unique.slice(0, 5) } : absent();
 };
 const money = (raw: string) => {
   const value = raw.replace(/\s/g, "").replace(",", ".");
@@ -28,9 +29,10 @@ const normalizeDate = (match: RegExpExecArray) => {
 export function parseReceiptText(text: string, today?: string): ReceiptSuggestions {
   const lines = text.replace(/\r/g, "\n").split(/\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 150);
   if (!lines.length) return { seller: absent(), purchaseDate: absent(), receiptTotal: absent(), receiptCurrency: absent(), receiptNumber: absent(), productName: absent(), productPrice: absent() };
-  const sellerCandidates = lines.slice(0, 7).filter((line) => /^[\p{L}][\p{L}\p{N} .,'&-]{2,79}$/u.test(line) && !forbiddenSeller.test(line) && /\p{L}/u.test(line)).slice(0, 2);
-  const legalSeller = lines.slice(0, 7).find((line) => /^(?:UAB|AB|MB|IĮ)\s+["„“]?\p{L}/u.test(line) && !forbiddenSeller.test(line));
-  const seller = legalSeller ? { value: legalSeller.replace(/["„“|]/g, "").trim(), state: "strong" as const } : pick(sellerCandidates, sellerCandidates.length === 1 && lines.indexOf(sellerCandidates[0]) < 3);
+  const sellerLines = lines.slice(0, 14).map((line) => line.replace(/["„“|]/g, "").trim());
+  const legalSeller = sellerLines.find((line) => /^(?:UAB|AB|MB|IĮ)\s+\p{L}/iu.test(line) && !forbiddenSeller.test(line));
+  const brandCandidates = sellerLines.slice(0, 8).filter((line) => /^[\p{L}][\p{L}\p{N} .,'&-]{2,79}$/u.test(line) && !forbiddenSeller.test(line)).slice(0, 3);
+  const seller = legalSeller ? { value: legalSeller, state: "strong" as const } : pick(brandCandidates, brandCandidates.length === 1 && sellerLines.indexOf(brandCandidates[0]) < 3);
   const dates: string[] = [];
   const labeledDates: string[] = [];
   for (const line of lines) {
@@ -44,7 +46,7 @@ export function parseReceiptText(text: string, today?: string): ReceiptSuggestio
     }
   }
   const distinctDates = [...new Set(dates)];
-  const purchaseDate = distinctDates.length === 1 ? pick(distinctDates, labeledDates.includes(distinctDates[0]) || dates.length === 1) : { value: "", state: distinctDates.length ? "uncertain" : "absent" } as Suggestion;
+  const purchaseDate = pick(distinctDates, distinctDates.length === 1 && (labeledDates.includes(distinctDates[0]) || dates.length === 1));
   const totals = lines.filter((line) => totalLabel.test(line)).flatMap((line) => {
     const match = line.match(/(?:^|\s)(\d{1,10}[.,]\s?\d{2})(?=\s|[€$£]|$)/);
     return match && money(match[1]) ? [{ value: money(match[1]), unit: currency(line) }] : [];
@@ -62,17 +64,31 @@ export function parseReceiptText(text: string, today?: string): ReceiptSuggestio
   const primary = numbers.filter((item) => item.primary);
   const receiptNumber = pick((primary.length ? primary : numbers).map((item) => item.value), true);
   const excluded = (line: string) => totalLabel.test(line) || /pvm|vat|nuolaida|discount|gr[ąa][žz]a|change|kortel|card|mok[ėe]j|payment|grynaisiais|apvalinim|suma|kasinink|kvitas|kvito|ček|cek|\bdata\b|\bdate\b|www\.|tel\.|[=%]/i.test(line);
-  const products: { name: string; price: string }[] = [];
+  const productFragment = (line: string) => line.length <= 100 && /\p{L}/u.test(line) && !excluded(line) &&
+    !/^(?:UAB|AB|MB|IĮ)\b/iu.test(line) && !/\b(?:g\.|gatvė|pr\.|LT-\d|@)\b/iu.test(line) && !/\d[.,]\s?\d{2}/.test(line);
+  const products: { name: string; price: string; strong: boolean; unit: string }[] = [];
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (excluded(line)) continue;
-    const match = line.match(/^([\p{L}][\p{L}\p{N} .,'+()\-/]{2,100}?)\s+(?:\d+\s*[xX*]\s*)?(\d{1,10}[.,]\s?\d{2})(?:\s*(?:€|EUR|USD|GBP|PLN|[$£]))?(?:\s+[A-D])?$/u);
-    if (!match) continue;
-    let name = match[1].trim();
-    const previous = lines[index - 1];
-    // Model + description often wrap onto the next line, before its price.
-    if (previous && /^[A-Z][A-Z0-9-]{4,}\s+\p{L}/u.test(previous) && !excluded(previous) && !/\d[.,]\d{2}/.test(previous)) name = `${previous} ${name}`;
-    products.push({ name, price: money(match[2]) });
+    const match = line.match(/^(.*?)(\d{1,10}[.,]\s?\d{2})(?:\s*(?:€|EUR|USD|GBP|PLN|[$£]))?(?:\s*[A-D])?$/iu);
+    if (!match || !money(match[2])) continue;
+    const prefix = match[1].replace(/\b\d+\s*[xX*]\s*$/u, "").trim();
+    const fragments = prefix && productFragment(prefix) ? [prefix] : [];
+    // Keep at most two adjacent wrapped lines; stop at totals, contacts and other amounts.
+    for (let back = 1; back <= 2 && index - back >= 0; back++) {
+      const previous = lines[index - back];
+      if (!productFragment(previous)) break;
+      if (fragments.length && !hasModelCode(previous)) break;
+      fragments.unshift(previous);
+      if (hasModelCode(previous)) break;
+    }
+    if (!fragments.length) continue;
+    const name = fragments.join(" ");
+    if (name.length > 200) continue;
+    products.push({ name, price: money(match[2]), strong: Boolean(prefix) && (fragments.length === 1 || hasModelCode(name)), unit: currency(line) });
   }
-  return { seller, purchaseDate, receiptTotal, receiptCurrency, receiptNumber, productName: pick(products.map((item) => item.name), true), productPrice: products.length === 1 ? pick([products[0].price], true) : absent() };
+  const productPrice = products.length === 1 ? pick([products[0].price], products[0].strong) : pick(products.map((item) => item.price), false);
+  const itemCurrency = products.length === 1 ? pick([products[0].unit], products[0].strong) : absent();
+  return { seller, purchaseDate, receiptTotal, receiptCurrency: receiptCurrency.state === "absent" ? itemCurrency : receiptCurrency,
+    receiptNumber, productName: pick(products.map((item) => item.name), products.length === 1 && products[0].strong), productPrice };
 }

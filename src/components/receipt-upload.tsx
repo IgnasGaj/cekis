@@ -7,7 +7,7 @@ import { todayInVilnius } from "@/lib/purchase-validation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
 import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
 import { ReceiptScanControls, useReceiptScan } from "./receipt-scan";
-import { hasModelCode, type ReceiptSuggestions } from "@/lib/ocr-parser";
+import { hasModelCode, suggestionValues, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import { emptyWarranty } from "@/lib/warranty";
 
 const limit = 10485760;
@@ -101,6 +101,14 @@ export function ExistingPurchaseUploader({ purchaseId }: { purchaseId: string })
 }
 const empty: PurchaseFields = { productName: "", seller: "", purchaseDate: "", price: "", currency: "EUR", notes: "" };
 const labels: Record<keyof PurchaseFields,string> = { productName: "Prekės pavadinimas", seller: "Pardavėjas", purchaseDate: "Pirkimo data", price: "Kaina (neprivaloma)", currency: "Valiuta", notes: "Pastabos (neprivaloma)" };
+function CandidateButtons({ suggestion, current, onApply, disabled }: { suggestion?: Suggestion; current: string; onApply: (value: string) => void; disabled: boolean }) {
+  if (!suggestion || suggestion.state === "absent") return null;
+  const options = suggestionValues(suggestion);
+  if (!options.length) return <p className="ocr-uncertain">Nuskaitymas neaiškus. Patikrink čekį ir įvesk pats.</p>;
+  if (suggestion.state === "strong" && options.length === 1 && current === options[0]) return null;
+  return <div className="ocr-suggestion"><span>{suggestion.state === "uncertain" ? "Galimi nuskaitymo variantai – patikrink čekį:" : "Nuskaityta:"}</span>
+    {options.map((option) => <button key={option} type="button" disabled={disabled} onClick={() => onApply(option)}>{option}</button>)}</div>;
+}
 export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
   const router = useRouter(); const { file, setFile, url } = useSelectedFile();
   const [values, setValues] = useState(empty); const [purchaseKey] = useState(newSubmissionKey);
@@ -110,13 +118,13 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
   const [number, setNumber] = useState(""); const numberEdited = useRef(false);
   const receiptScan = useReceiptScan(maxDate, (parsed) => {
     setSuggestions(parsed);
-    if (!numberEdited.current && parsed.receiptNumber.state === "strong") setNumber(parsed.receiptNumber.value);
+    if (!numberEdited.current && parsed.receiptNumber.value) setNumber(parsed.receiptNumber.value);
     setValues((prior) => {
       const next = { ...prior };
       for (const name of ["productName", "seller", "purchaseDate"] as const) {
-        if (parsed[name].state === "strong" && !edited.current.has(name)) next[name] = parsed[name].value;
+        if (parsed[name].value && !edited.current.has(name)) next[name] = parsed[name].value;
       }
-      if (parsed.productPrice.state === "strong" && !edited.current.has("price")) next.price = parsed.productPrice.value;
+      if (parsed.productPrice.value && !edited.current.has("price")) next.price = parsed.productPrice.value;
       if (parsed.receiptCurrency.state === "strong" && !edited.current.has("currency")) next.currency = parsed.receiptCurrency.value;
       return next;
     });
@@ -175,10 +183,10 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     <form className="purchase-form" onSubmit={save} noValidate><p className="small-note">{purchaseId ? "Pirkinys jau išsaugotas. Čia rodomi išsaugoti duomenys; bandant dar kartą įkeliamas tik čekis." : "Patikrink nuskaitytus duomenis ir pataisyk trūkstamus laukus. EUR yra pasirinkta numatytoji valiuta; patikrink ją čekyje."}</p>
       {(Object.keys(labels) as (keyof PurchaseFields)[]).map((name) => <div className="field" key={name}><label htmlFor={`receipt-${name}`}>{labels[name]}</label>
         {name === "currency" ? <select id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} onChange={(event) => changeField(name, event.target.value)}><option>EUR</option><option>USD</option><option>GBP</option><option>PLN</option></select> : name === "notes" ? <textarea id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} value={values[name]} maxLength={2000} onChange={(event) => changeField(name, event.target.value)} /> : <input id={`receipt-${name}`} disabled={busy || Boolean(purchaseId)} type={name === "purchaseDate" ? "date" : "text"} max={name === "purchaseDate" ? maxDate : undefined} maxLength={name === "productName" || name === "seller" ? 200 : undefined} value={values[name]} onChange={(event) => changeField(name, event.target.value)} />}
-        {name !== "currency" && name !== "notes" && suggestions?.[name === "price" ? "productPrice" : name]?.state === "uncertain" && <p className="ocr-uncertain">Patikrink šį lauką čekyje: nuskaitymas nėra patikimas.</p>}
+        {name !== "currency" && name !== "notes" && <CandidateButtons suggestion={suggestions?.[name === "price" ? "productPrice" : name]} current={values[name]} disabled={busy || Boolean(purchaseId)} onApply={(value) => changeField(name, value)} />}
         {name === "productName" && hasModelCode(values.productName) && <p className="ocr-uncertain">Modelio kodą sutikrink su čekiu: panašūs simboliai gali būti atpažinti klaidingai.</p>}
       </div>)}
-      <div className="field"><label htmlFor="receipt-number">Čekio numeris (neprivaloma)</label><input id="receipt-number" disabled={busy || Boolean(purchaseId)} value={number} maxLength={100} onChange={(event) => { numberEdited.current = true; setNumber(event.target.value); }} /></div>
+      <div className="field"><label htmlFor="receipt-number">Čekio numeris (neprivaloma)</label><input id="receipt-number" disabled={busy || Boolean(purchaseId)} value={number} maxLength={100} onChange={(event) => { numberEdited.current = true; setNumber(event.target.value); }} /><CandidateButtons suggestion={suggestions?.receiptNumber} current={number} disabled={busy || Boolean(purchaseId)} onApply={(value) => { numberEdited.current = true; setNumber(value); }} /></div>
       {!purchaseId && <fieldset disabled={busy}><WarrantyEditor value={warranty} onChange={setWarranty} purchaseDate={values.purchaseDate} initialPurchaseDate="" initialKnown={false} fields={false} /></fieldset>}
       <button className="primary-button" disabled={busy || receiptScan.state === "loading"} type="submit">{busy ? "Įkeliama…" : purchaseId ? "Bandyti dar kartą" : "Išsaugoti pirkinį ir čekį"}</button>
       <button className="secondary-button" type="button" onClick={cancel}>Atšaukti</button></form></>}
