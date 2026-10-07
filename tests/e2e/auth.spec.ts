@@ -58,9 +58,10 @@ test("tikras el. pašto nuorodos gyvavimo ciklas ir paskyrų izoliacija", async 
   const linkA = await requestLink(pageA, emailA);
   await pageA.goto(linkA);
   await expect(pageA).toHaveURL(/\/pradzia/);
-  await expect(pageA.getByRole("heading", { name: /Labas/ })).toBeVisible();
+  await expect(pageA.getByRole("heading", { name: "Pradžia" })).toBeVisible();
   await pageA.reload();
-  await expect(pageA.getByText("Tvarkyk pirkinius vienoje vietoje")).toBeVisible();
+  await expect(pageA.getByRole("heading", { name: "Dar neturite pirkinių" })).toBeVisible();
+  await expect(pageA.getByRole("link", { name: "Pridėti čekį" }).first()).toHaveAttribute("href", "/prideti");
   await pageA.getByRole("link", { name: "Nustatymai" }).click();
   await expect(pageA.getByText(emailA)).toBeVisible();
   await expect(pageA.getByText(emailB)).toHaveCount(0);
