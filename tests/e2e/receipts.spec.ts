@@ -676,7 +676,12 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
     await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
     await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue(confirmedName);
     if (variant.name === "keli-produktai") {
-      await expect(page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas") }).getByText("Rasti keli galimi variantai. Patikrink čekį ir įvesk pats.")).toBeVisible();
+      const productField = page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas") });
+      await expect(productField.getByText("Pienas", { exact: true })).toBeVisible();
+      await expect(productField.getByText("Duona", { exact: true })).toBeVisible();
+      const priceField = page.locator(".field").filter({ has: page.getByLabel("Prekės kaina (neprivaloma)") });
+      await expect(priceField.getByText("2.30", { exact: true })).toBeVisible();
+      await expect(priceField.getByText("1.40", { exact: true })).toBeVisible();
       confirmedName = "Kelių prekių čekis, pasirinkta rankiniu būdu";
       await page.getByLabel("Prekės pavadinimas").fill(confirmedName);
       await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();

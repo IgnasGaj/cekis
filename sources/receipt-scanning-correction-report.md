@@ -24,6 +24,7 @@ This continues the existing receipt repair on `main`; it does not start another 
 - Fictional photographed JPEGs through real browser Tesseract: textured-background wrapped item/amount-only VAT price reached the editable form; ambiguous multi-item prices appeared as review choices; the receipt total stayed separate. The wrapped case saved to disposable services, survived reload, and downloaded original bytes matched the selected file.
 - Existing-purchase image selection, scan, upload and review passed against disposable services. A browser regression confirmed late OCR and retry do not overwrite typed seller, product name or price. Focused parser/scan tests passed (19 cases).
 - Final local verification: five focused real-browser OCR scenarios passed, including the private owner photograph, textured fictional receipt, multi-item ambiguity, existing-purchase scan and manual-edit preservation. Focused parser/scan tests passed (19 cases); lint, typecheck, production build and diff whitespace check passed. The final-commit CI result remains pending before merge.
+- First pushed-branch CI reached the full browser suite and failed an older assertion that expected the removed generic multi-product warning. Its updated assertion now checks the two actual product and price candidates; that focused scenario passed locally. The other 45 browser cases passed in the same local full-suite run. A new exact-commit CI run is required.
 - Physical iPhone/Android capture: unavailable; desktop browser file selection is the verified path.
 
 ## Delivery
