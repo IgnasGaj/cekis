@@ -173,6 +173,18 @@ describe("durable reminder worker",()=>{
     expect(identities.find((entry)=>entry.identity===original)).toMatchObject({status:"cancelled",recipient_version:1});
     expect(identities.find((entry)=>entry.identity!==original)).toMatchObject({status:"pending",recipient_version:3});
   });
+  it("does not send a claimed expiry after the purchase changes before authorization",async()=>{
+    const item=await purchase();
+    let sends=0;
+    const result=await worker.runReminderWorker({now,send:async()=>{sends++;return "<accepted@test>";},beforeAuthorize:async()=>{
+      await pool.query("UPDATE purchase SET warranty_end_date='2028-09-10',revision=revision+1 WHERE id=$1",[item.id]);
+      await reconcile(item.owner,item.id);
+    }});
+    expect(result.accepted).toBe(0);
+    expect(sends).toBe(0);
+    const rows=(await pool.query("SELECT end_date::text,status FROM warranty_reminder WHERE purchase_id=$1 ORDER BY end_date",[item.id])).rows;
+    expect(rows).toEqual([{end_date:"2028-07-10",status:"cancelled"},{end_date:"2028-09-10",status:"pending"}]);
+  });
   it("repairs larger accounts in bounded chunks and defers outside the send window",async()=>{
     const item=await purchase();
     await pool.query("UPDATE reminder_preference SET enabled=false,revision=revision+1 WHERE user_id=$1",[item.owner]);

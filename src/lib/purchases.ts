@@ -6,7 +6,7 @@ import { purchase } from "./schema";
 import { requireSession } from "./session";
 import type { parsePurchaseFields } from "./purchase-validation";
 import { todayInVilnius } from "./purchase-validation";
-import { emptyWarranty, type WarrantyInput } from "./warranty";
+import { defaultWarranty, type WarrantyInput } from "./warranty";
 import { reconcilePurchase } from "./reminders";
 
 type Values = NonNullable<ReturnType<typeof parsePurchaseFields>["value"]>;
@@ -93,7 +93,8 @@ export async function getPurchase(id: string) {
   return row ?? null;
 }
 
-export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<typeof getPurchase>>>, values: Values, warranty: WarrantyInput = emptyWarranty) {
+export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<typeof getPurchase>>>, values: Values, warranty?: WarrantyInput) {
+  warranty ??= defaultWarranty(values.purchaseDate);
   return saved.productName === values.productName && saved.seller === values.seller &&
     saved.purchaseDate === values.purchaseDate && saved.price === values.price &&
     saved.currency === values.currency && saved.notes === values.notes &&
@@ -102,6 +103,7 @@ export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<t
 }
 
 export async function createPurchase(key: string, values: Values, warranty?: WarrantyInput) {
+  warranty ??= defaultWarranty(values.purchaseDate);
   const { user } = await requireSession();
   if (!isPurchaseId(key)) return null;
   const client = await pool.connect();
@@ -111,7 +113,7 @@ export async function createPurchase(key: string, values: Values, warranty?: War
       warranty_state,warranty_end_date,warranty_duration_months,warranty_source)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(owner_id,submission_key) DO NOTHING RETURNING id`,
       [user.id,key,values.productName,values.seller,values.purchaseDate,values.price,values.currency,values.notes,
-        warranty?.warrantyState ?? "unknown",warranty?.warrantyEndDate ?? null,warranty?.warrantyDurationMonths ?? null,warranty?.warrantySource ?? null]);
+        warranty.warrantyState,warranty.warrantyEndDate,warranty.warrantyDurationMonths,warranty.warrantySource]);
     if (inserted.rows[0]) await reconcilePurchase(client,user.id,inserted.rows[0].id);
     const existing = inserted.rows[0] ?? (await client.query<{ id: string; deleted_at: Date | null }>(
       "SELECT id,deleted_at FROM purchase WHERE owner_id=$1 AND submission_key=$2",[user.id,key])).rows[0];

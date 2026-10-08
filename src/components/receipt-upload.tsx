@@ -5,10 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { todayInVilnius } from "@/lib/purchase-validation";
 import type { PurchaseFields } from "@/lib/purchase-validation";
-import { WarrantyEditor, draftFromWarranty } from "./warranty-editor";
+import { WarrantyEditor, newWarrantyDraft } from "./warranty-editor";
 import { ReceiptScanControls, useReceiptScan } from "./receipt-scan";
 import { hasModelCode, suggestionValues, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
-import { emptyWarranty } from "@/lib/warranty";
 
 const limit = 10485760;
 function newSubmissionKey() {
@@ -130,7 +129,7 @@ export function AddReceiptFlow({ maxDate }: { maxDate: string }) {
     });
   });
   const changeField = (name: keyof PurchaseFields, value: string) => { edited.current.add(name); setValues((prior) => ({ ...prior, [name]: value })); };
-  const [warranty, setWarranty] = useState(() => draftFromWarranty(emptyWarranty));
+  const [warranty, setWarranty] = useState(newWarrantyDraft);
   const [uploadKey, setUploadKey] = useState(newSubmissionKey); const [purchaseId, setPurchaseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const controller = useRef<AbortController | null>(null);
   const createAttempted = useRef(false); const operation = useRef(0); const saving = useRef(false); const cancelling = useRef(false);

@@ -86,7 +86,7 @@ One receipt can cover several products. Store its original once; allow purchases
 
 Use PostgreSQL `date` for purchase/warranty calendar dates and timezone-aware timestamps for events. Store money as fixed precision or integer minor units, never floating-point values. Use EUR as the UI default without silently interpreting other currencies as EUR.
 
-Unknown warranty and no warranty are different states. Do not prefill every purchase with 24 months. When a user enters a duration, calculate an end-date suggestion and display it for confirmation; define month-end/leap-year handling. No reminder should exist without a confirmed warranty end date.
+Unknown warranty and no warranty are different states. New purchases default to 24 months, with 6, 12, 24 and 36-month choices. Calculate the end date from the purchase date and selected calendar-month duration, clamping month ends; saving confirms the calculated date without a separate step. Existing records keep their recorded state, duration and end date. Legacy end-date-only records retain their saved date on unrelated edits and can be explicitly converted to a duration. No reminder should exist without a recorded warranty end date. These periods are tracking choices, not legal determinations.
 
 Every record and file must be scoped to its authenticated owner. Never accept a client-provided owner ID as authority. A random UUID or hidden button does not provide access control. Enforce ownership in database queries and file authorisation; use a limited database role and test cross-account denial. PostgreSQL RLS may add defence in depth if implemented correctly, but it is not automatically provided by choosing PostgreSQL.
 
@@ -168,9 +168,9 @@ Acceptance: representative Lithuanian receipts are reviewed; ambiguous dates/tot
 
 ### Sprint 5 — Warranty tracking
 
-Implement unknown/none/known warranty states, confirmed end date or duration, and editing. Show **Galioja**, **Greitai baigsis**, **Pasibaigė**, or **Garantija nenurodyta** with dates/remaining days. Add warranty filters and sort by next expiry.
+Implement unknown/none/known warranty states, calculated end date from duration, legacy end-date-only compatibility, and editing. Show **Galioja**, **Greitai baigsis**, **Pasibaigė**, or **Garantija nenurodyta** with dates/remaining days. Add warranty filters and sort by next expiry.
 
-Acceptance: date boundaries, month-end/leap-year handling and unknown/none states are verified; saved dates persist correctly; no default legal warranty period appears. Define the display timezone and expiry boundary consistently.
+Acceptance: date boundaries, month-end/leap-year handling and unknown/none states are verified; saved dates persist correctly; the 24-month tracking default is not presented as a legal warranty period. Use Europe/Vilnius for the current-day and expiry boundary; store purchase and end dates as PostgreSQL date-only values.
 
 ### Sprint 6 — Warranty email reminders
 

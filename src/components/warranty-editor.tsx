@@ -1,48 +1,40 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { addMonthsClamped, type WarrantyDraft, type WarrantyInput } from "@/lib/warranty";
+import { addMonthsClamped, quickDurations, type WarrantyDraft, type WarrantyInput } from "@/lib/warranty";
 import { displayDate } from "@/lib/purchase-format";
 
 export function draftFromWarranty(value: WarrantyInput): WarrantyDraft {
   return { warrantyState: value.warrantyState, warrantyEndDate: value.warrantyEndDate ?? "", warrantyDurationMonths: value.warrantyDurationMonths?.toString() ?? "", warrantySource: value.warrantySource ?? "", warrantyConfirmed: value.warrantyState === "known" };
 }
+export function newWarrantyDraft(): WarrantyDraft {
+  return { warrantyState: "known", warrantyEndDate: "", warrantyDurationMonths: "24", warrantySource: "duration", warrantyConfirmed: true };
+}
 
 export function WarrantyEditor({ value, onChange, purchaseDate, initialPurchaseDate, initialKnown, error, fields = true }: {
   value: WarrantyDraft; onChange: (value: WarrantyDraft) => void; purchaseDate: string; initialPurchaseDate: string; initialKnown: boolean; error?: string; fields?: boolean;
 }) {
-  const previousDate = useRef(purchaseDate);
-  useEffect(() => {
-    if (previousDate.current === purchaseDate) return;
-    previousDate.current = purchaseDate;
-    const current = value;
-    if (current.warrantyState !== "known") return;
-    if (initialKnown && purchaseDate !== initialPurchaseDate) {
-      onChange({ ...current, warrantySource: "date", warrantyDurationMonths: "", warrantyConfirmed: false });
-    } else if (current.warrantySource === "duration") {
-      onChange({ ...current, warrantyEndDate: addMonthsClamped(purchaseDate, Number(current.warrantyDurationMonths)) ?? "", warrantyConfirmed: false });
-    } else onChange({ ...current, warrantyConfirmed: false });
-  }, [purchaseDate, initialKnown, initialPurchaseDate, onChange, value]);
-  const changeState = (state: string) => onChange(state === "known"
-    ? { warrantyState: "known", warrantyEndDate: "", warrantyDurationMonths: "", warrantySource: "date", warrantyConfirmed: false }
+  const legacy = value.warrantyState === "known" && value.warrantySource === "date";
+  const preview = value.warrantySource === "duration" ? addMonthsClamped(purchaseDate, Number(value.warrantyDurationMonths)) : value.warrantyEndDate;
+  const legacyDuration = value.warrantySource === "duration" && value.warrantyDurationMonths && !quickDurations.some((months) => String(months) === value.warrantyDurationMonths);
+  const changeState = (state: string) => onChange(state === "known" ? newWarrantyDraft()
     : { warrantyState: state, warrantyEndDate: "", warrantyDurationMonths: "", warrantySource: "", warrantyConfirmed: false });
-  const changeMode = (source: string) => onChange({ ...value, warrantySource: source, warrantyEndDate: "", warrantyDurationMonths: "", warrantyConfirmed: false });
-  const changeDuration = (months: string) => onChange({ ...value, warrantyDurationMonths: months, warrantyEndDate: addMonthsClamped(purchaseDate, Number(months)) ?? "", warrantyConfirmed: false });
+  const changeDuration = (months: string) => onChange({ ...value, warrantyDurationMonths: months, warrantyEndDate: "", warrantyConfirmed: true });
   return <section className="warranty-editor" aria-label="Garantijos informacija">
     <h2>Garantija</h2>
     <div className="field"><label htmlFor="warranty-state">Garantijos būsena</label><select id="warranty-state" name={fields ? "warrantyState" : undefined} value={value.warrantyState} onChange={(event) => changeState(event.target.value)}>
-      <option value="unknown">Nežinau / nenurodyta</option><option value="none">Garantijos nėra</option><option value="known">Nurodyti garantiją</option>
+      <option value="known">Nurodyti garantiją</option><option value="unknown">Garantija nežinoma</option><option value="none">Garantijos nėra</option>
     </select></div>
     {value.warrantyState === "known" && <>
-      <div className="field"><label htmlFor="warranty-source">Kaip nurodysi pabaigą?</label><select id="warranty-source" name={fields ? "warrantySource" : undefined} value={value.warrantySource} onChange={(event) => changeMode(event.target.value)}>
-        <option value="date">Įvesiu datą</option><option value="duration">Nurodysiu trukmę mėnesiais</option>
-      </select></div>
-      {value.warrantySource === "duration" ? <div className="field"><label htmlFor="warranty-months">Trukmė mėnesiais (1–600)</label><input id="warranty-months" name={fields ? "warrantyDurationMonths" : undefined} type="number" min="1" max="600" step="1" value={value.warrantyDurationMonths} onChange={(event) => changeDuration(event.target.value)} />
-        {value.warrantyEndDate && <p className="warranty-suggestion">Siūloma pabaigos data: <strong>{displayDate(value.warrantyEndDate)}</strong></p>}</div>
-      : <div className="field"><label htmlFor="warranty-date">Garantijos pabaigos data</label><input id="warranty-date" name={fields ? "warrantyEndDate" : undefined} type="date" min={purchaseDate || "0001-01-01"} max="9999-12-31" value={value.warrantyEndDate} onChange={(event) => onChange({ ...value, warrantyEndDate: event.target.value, warrantyConfirmed: false })} /></div>}
-      {value.warrantySource === "duration" && fields && <input type="hidden" name="warrantyEndDate" value={value.warrantyEndDate} />}
-      {value.warrantySource === "date" && fields && <input type="hidden" name="warrantyDurationMonths" value="" />}
-      <div className="warranty-confirm"><label><input type="checkbox" name={fields ? "warrantyConfirmed" : undefined} checked={value.warrantyConfirmed} disabled={!value.warrantyEndDate} onChange={(event) => onChange({ ...value, warrantyConfirmed: event.target.checked })} /> Patvirtinu garantijos pabaigos datą{value.warrantyEndDate ? `: ${displayDate(value.warrantyEndDate)}` : ""}</label></div>
-      {initialKnown && purchaseDate !== initialPurchaseDate && <p className="small-note">Pirkimo data pasikeitė. Patikrink išsaugotą garantijos datą ir patvirtink ją iš naujo.</p>}
+      {legacy ? <>
+        <p className="small-note">Anksčiau išsaugota garantijos pabaiga lieka {value.warrantyEndDate ? displayDate(value.warrantyEndDate) : "nenurodyta"}. Pakeitus pirkimo datą, ši pabaiga nesikeičia.</p>
+        <button className="secondary-button" type="button" onClick={() => onChange(newWarrantyDraft())}>Pakeisti į trukmę (perskaičiuos pabaigą)</button>
+      </> : <div className="field"><label htmlFor="warranty-months">Garantijos trukmė</label><select id="warranty-months" name={fields ? "warrantyDurationMonths" : undefined} value={value.warrantyDurationMonths} onChange={(event) => changeDuration(event.target.value)}>
+        {legacyDuration && <option value={value.warrantyDurationMonths}>{value.warrantyDurationMonths} mėn. (anksčiau išsaugota)</option>}
+        {quickDurations.map((months) => <option key={months} value={months}>{months} mėn.</option>)}
+      </select><p className="small-note">Pasirinkta trukmė naudojama garantijos datai ir priminimams skaičiuoti.</p></div>}
+      {preview ? <p className="warranty-suggestion" aria-live="polite">Garantija iki: <strong>{displayDate(preview)}</strong></p>
+        : <p className="small-note" role="status">Garantijos pabaigai apskaičiuoti reikia tinkamos pirkimo datos.</p>}
+      {initialKnown && legacy && purchaseDate !== initialPurchaseDate && <p className="small-note">Pirkimo data pasikeitė. Anksčiau išsaugota garantijos pabaiga lieka ta pati.</p>}
+      {fields && <><input type="hidden" name="warrantySource" value={value.warrantySource} /><input type="hidden" name="warrantyEndDate" value={preview ?? ""} /><input type="hidden" name="warrantyConfirmed" value="on" />{legacy && <input type="hidden" name="warrantyDurationMonths" value="" />}</>}
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
   </section>;

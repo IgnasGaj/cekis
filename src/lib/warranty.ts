@@ -6,6 +6,10 @@ export type WarrantyInput = { warrantyState: WarrantyState; warrantyEndDate: str
 export type WarrantyDraft = { warrantyState: string; warrantyEndDate: string; warrantyDurationMonths: string; warrantySource: string; warrantyConfirmed: boolean };
 export const emptyWarranty: WarrantyInput = { warrantyState: "unknown", warrantyEndDate: null, warrantyDurationMonths: null, warrantySource: null };
 export const MAX_END_DATE = "9999-12-31";
+export const quickDurations = [6, 12, 24, 36] as const;
+export function defaultWarranty(purchaseDate: string): WarrantyInput {
+  return { warrantyState: "known", warrantySource: "duration", warrantyDurationMonths: 24, warrantyEndDate: addMonthsClamped(purchaseDate, 24) };
+}
 
 export function validDateOnly(value: string, max = MAX_END_DATE): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < "0001-01-01" || value > max) return false;
@@ -33,26 +37,27 @@ export function addMonthsClamped(purchaseDate: string, months: number): string |
   return `${String(targetYear).padStart(4, "0")}-${String(target).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
 }
 
-export function parseWarranty(draft: WarrantyDraft, purchaseDate: string): { value: WarrantyInput | null; error?: string } {
+export function parseWarranty(draft: WarrantyDraft, purchaseDate: string, existing?: WarrantyInput): { value: WarrantyInput | null; error?: string } {
   if (draft.warrantyState === "unknown" || draft.warrantyState === "none") {
     if (draft.warrantyEndDate || draft.warrantyDurationMonths || draft.warrantySource || draft.warrantyConfirmed)
       return { value: null, error: "Išvalyk garantijos datą ir trukmę." };
     return { value: { ...emptyWarranty, warrantyState: draft.warrantyState } };
   }
   if (draft.warrantyState !== "known") return { value: null, error: "Pasirink garantijos būseną." };
-  if (!draft.warrantyConfirmed) return { value: null, error: "Patvirtink pasirinktą garantijos pabaigos datą." };
-  if (draft.warrantySource !== "date" && draft.warrantySource !== "duration") return { value: null, error: "Pasirink datos įvedimo būdą." };
-  if (!validDateOnly(draft.warrantyEndDate) || draft.warrantyEndDate < purchaseDate)
-    return { value: null, error: "Pasirink tinkamą garantijos pabaigos datą, ne ankstesnę už pirkimą." };
+  if (!validDateOnly(purchaseDate)) return { value: null, error: "Įvesk tinkamą pirkimo datą." };
   if (draft.warrantySource === "date") {
-    if (draft.warrantyDurationMonths) return { value: null, error: "Tiesioginei datai trukmė netaikoma." };
-    return { value: { warrantyState: "known", warrantyEndDate: draft.warrantyEndDate, warrantyDurationMonths: null, warrantySource: "date" } };
+    if (draft.warrantyDurationMonths || !existing || existing.warrantySource !== "date" || existing.warrantyEndDate !== draft.warrantyEndDate)
+      return { value: null, error: "Išsaugotą datą galima tik išlaikyti arba pakeisti į trukmę." };
+    if (draft.warrantyEndDate < purchaseDate) return { value: null, error: "Pirkimo data negali būti vėlesnė už išsaugotą garantijos pabaigą." };
+    return { value: existing };
   }
-  if (!/^[1-9]\d{0,2}$/.test(draft.warrantyDurationMonths)) return { value: null, error: "Įvesk sveiką trukmę nuo 1 iki 600 mėnesių." };
+  if (draft.warrantySource !== "duration" || !/^[1-9]\d{0,2}$/.test(draft.warrantyDurationMonths)) return { value: null, error: "Pasirink garantijos trukmę." };
   const months = Number(draft.warrantyDurationMonths);
-  if (months > 600 || addMonthsClamped(purchaseDate, months) !== draft.warrantyEndDate)
-    return { value: null, error: "Patikrink trukmės pasiūlymą ir patvirtink datą iš naujo." };
-  return { value: { warrantyState: "known", warrantyEndDate: draft.warrantyEndDate, warrantyDurationMonths: months, warrantySource: "duration" } };
+  if (!quickDurations.some((duration) => duration === months) && !(existing?.warrantySource === "duration" && existing.warrantyDurationMonths === months))
+    return { value: null, error: "Pasirink 6, 12, 24 arba 36 mėnesius." };
+  const endDate = addMonthsClamped(purchaseDate, months);
+  if (!endDate) return { value: null, error: "Garantijos pabaigos datos apskaičiuoti nepavyko." };
+  return { value: { warrantyState: "known", warrantyEndDate: endDate, warrantyDurationMonths: months, warrantySource: "duration" } };
 }
 
 export function warrantyFromForm(form: FormData): WarrantyDraft | null {

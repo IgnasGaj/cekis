@@ -296,9 +296,7 @@ test("garantijos valdikliai užrakinami per kūrimą, o atšaukimas nepakeičia 
   await page.getByLabel("Pardavėjas").fill("Pardavėjas");
   await page.getByLabel("Pirkimo data").fill("2024-01-01");
   await page.getByLabel("Garantijos būsena").selectOption("known");
-  await page.getByLabel("Kaip nurodysi pabaigą?").selectOption("duration");
-  await page.getByLabel("Trukmė mėnesiais (1–600)").fill("48");
-  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByLabel("Garantijos trukmė").selectOption("36");
 
   let firstRelease!: () => void;
   const firstGate = new Promise<void>((resolve) => { firstRelease = resolve; });
@@ -321,38 +319,30 @@ test("garantijos valdikliai užrakinami per kūrimą, o atšaukimas nepakeičia 
   });
   await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
   await expect(page.getByLabel("Garantijos būsena")).toBeDisabled();
-  await expect(page.getByLabel("Kaip nurodysi pabaigą?")).toBeDisabled();
-  await expect(page.getByLabel("Trukmė mėnesiais (1–600)")).toBeDisabled();
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeDisabled();
+  await expect(page.getByLabel("Garantijos trukmė")).toBeDisabled();
   await page.locator("form.purchase-form").evaluate((form) => (form as HTMLFormElement).requestSubmit());
   expect(requests).toBe(1);
   firstRelease();
   await expect(page.getByText("Laikina klaida.")).toBeVisible();
   await expect(page.getByLabel("Garantijos būsena")).toBeEnabled();
-  await expect(page.getByLabel("Trukmė mėnesiais (1–600)")).toHaveValue("48");
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("36");
 
-  await page.getByLabel("Kaip nurodysi pabaigą?").selectOption("date");
-  await page.getByLabel("Garantijos pabaigos data").fill("2029-01-01");
-  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByLabel("Garantijos trukmė").selectOption("24");
   await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
   await committed;
   await expect(page.getByLabel("Garantijos būsena")).toBeDisabled();
-  await expect(page.getByLabel("Kaip nurodysi pabaigą?")).toBeDisabled();
-  await expect(page.getByLabel("Garantijos pabaigos data")).toBeDisabled();
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeDisabled();
+  await expect(page.getByLabel("Garantijos trukmė")).toBeDisabled();
   await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
   secondRelease();
   await choose();
-  await expect(page.getByLabel("Garantijos pabaigos data")).toHaveValue("2029-01-01");
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("24");
   await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
   await db(async (client) => {
     const rows = await client.query("SELECT p.warranty_state,p.warranty_end_date::text,p.warranty_source,(SELECT count(*)::int FROM purchase_receipt WHERE purchase_id=p.id) AS receipts FROM purchase p JOIN \"user\" u ON u.id=p.owner_id WHERE u.email=$1", [email]);
     expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0]).toMatchObject({ warranty_state: "known", warranty_end_date: "2029-01-01", warranty_source: "date", receipts: 1 });
+    expect(rows.rows[0]).toMatchObject({ warranty_state: "known", warranty_end_date: "2026-01-01", warranty_source: "duration", receipts: 1 });
   });
 });
 
@@ -766,26 +756,20 @@ test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", asy
   await signIn(page, email);
   const purchaseId = await createPurchase(page, "Garantijos čekis");
   await page.goto(`/pirkiniai/${purchaseId}/redaguoti`);
-  await page.getByLabel("Garantijos būsena").selectOption("known");
-  await page.getByLabel("Garantijos pabaigos data").fill("2028-01-01");
-  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByLabel("Garantijos trukmė").selectOption("36");
   await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
-  await expect(page.getByText("Pabaigos data:")).toContainText("2028");
+  await expect(page.getByText("Pabaigos data:")).toContainText("2027");
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
   const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "garantija.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: png });
   expect(uploaded.status()).toBe(200);
   const receiptId = (await uploaded.json()).id as string;
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   await page.waitForLoadState("networkidle");
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).toBeChecked();
+  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("36");
   await page.getByLabel("Pirkimo data").fill("2024-02-01");
-  await expect(page.getByText("Pirkimo data pasikeitė. Patikrink išsaugotą garantijos datą ir patvirtink ją iš naujo.")).toBeVisible();
-  await expect(page.getByLabel(/Patvirtinu garantijos pabaigos datą/)).not.toBeChecked();
+  await expect(page.getByText("Garantija iki:")).toContainText("2027");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-  await expect(page.getByText("Patvirtink pasirinktą garantijos pabaigos datą.")).toBeVisible();
-  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
-  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-  await expect(page.getByText("Pabaigos data:")).toContainText("2028");
+  await expect(page.getByText("Pabaigos data:")).toContainText("2027");
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   const stale = await page.context().newPage(); await stale.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   await page.getByLabel("Prekės pavadinimas").fill("Naujesnis įrašas");
@@ -797,7 +781,7 @@ test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", asy
   await expect(stale.getByLabel("Prekės pavadinimas")).toHaveValue("Pasenęs įrašas");
   await db(async (client) => {
     const result = await client.query("SELECT product_name,warranty_state,warranty_end_date::text FROM purchase WHERE id=$1", [purchaseId]);
-    expect(result.rows[0]).toMatchObject({ product_name: "Naujesnis įrašas", warranty_state: "known", warranty_end_date: "2028-01-01" });
+    expect(result.rows[0]).toMatchObject({ product_name: "Naujesnis įrašas", warranty_state: "known", warranty_end_date: "2027-02-01" });
   });
 });
 

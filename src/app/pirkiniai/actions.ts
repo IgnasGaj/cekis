@@ -4,7 +4,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { createPurchase, deletePurchase, getPurchase, isPurchaseId, purchaseMatchesSubmitted, updatePurchase } from "@/lib/purchases";
 import { fieldsFromForm, parsePurchaseFields, type PurchaseErrors } from "@/lib/purchase-validation";
 import { requireSession } from "@/lib/session";
-import { parseWarranty, warrantyFromForm } from "@/lib/warranty";
+import { parseWarranty, warrantyFromForm, type WarrantyInput } from "@/lib/warranty";
 
 export type FormState = { errors: PurchaseErrors & { warranty?: string }; existingPurchaseId?: string };
 const failed: FormState = { errors: { form: "Nepavyko išsaugoti. Patikrink ryšį ir bandyk dar kartą." } };
@@ -39,7 +39,10 @@ export async function editAction(id: string, context: string, _state: FormState,
   const parsed = parsePurchaseFields(fieldsFromForm(form));
   if (!parsed.value) return { errors: parsed.errors };
   const draft = warrantyFromForm(form);
-  const warranty = draft ? parseWarranty(draft, parsed.value.purchaseDate) : null;
+  const saved = await getPurchase(id);
+  if (!saved) return { errors: { form: "Pirkinys nerastas." } };
+  const existing = { warrantyState: saved.warrantyState, warrantyEndDate: saved.warrantyEndDate, warrantyDurationMonths: saved.warrantyDurationMonths, warrantySource: saved.warrantySource } as WarrantyInput;
+  const warranty = draft ? parseWarranty(draft, parsed.value.purchaseDate, existing) : null;
   if (warranty && !warranty.value) return { errors: { warranty: warranty.error } };
   const revision = Number(form.get("expectedRevision"));
   if (!Number.isSafeInteger(revision) || revision < 1) return { errors: { form: "Atnaujink puslapį ir patikrink naujausius duomenis." } };
