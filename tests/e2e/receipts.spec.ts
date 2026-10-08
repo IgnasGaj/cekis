@@ -642,8 +642,10 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible();
+  await expect.poll(async () => db(async (client) => (await client.query("SELECT product_name FROM purchase WHERE id=$1", [purchaseId])).rows[0]?.product_name),
+    { timeout: 15000 }).toBe("Rankiniu būdu patvirtinta prekė");
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible({ timeout: 15000 });
   const variants = [
     { name: "keli-produktai", lines: ["PREKYBOS CENTRAS", "Pienas 2,30 EUR", "Duona 1,40 EUR", "Is viso 3,70 EUR", "Data 2026-10-05"] },
     { name: "neryskus", lines: ["PREKYBOS CENTRAS", "Preke 12,30 EUR", "Is viso 12,30 EUR"], blur: true },
