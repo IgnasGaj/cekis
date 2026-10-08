@@ -8,7 +8,7 @@ Object.defineProperty(self, "Worker", { configurable: true, value: class extends
 } });
 let cancelled = false;
 const stop = () => { cancelled = true; for (const child of children) child.terminate(); children.clear(); self.postMessage({ type: "cancelled" }); self.close(); };
-self.onmessage = async (event: MessageEvent<{ type: "start"; bytes?: ArrayBuffer } | { type: "cancel" }>) => {
+self.onmessage = async (event: MessageEvent<{ type: "start"; bytes?: ArrayBuffer; mode?: "auto" | "block" } | { type: "cancel" }>) => {
   if (event.data.type === "cancel") { stop(); return; }
   if (event.data.type !== "start" || !event.data.bytes) return;
   try {
@@ -20,9 +20,9 @@ self.onmessage = async (event: MessageEvent<{ type: "start"; bytes?: ArrayBuffer
     });
     if (cancelled) { await worker.terminate(); return; }
     try {
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, preserve_interword_spaces: "1" });
+      await worker.setParameters({ tessedit_pageseg_mode: event.data.mode === "auto" ? PSM.AUTO : PSM.SINGLE_BLOCK, preserve_interword_spaces: "1" });
       const result = await worker.recognize(new Blob([event.data.bytes]));
-      if (!cancelled) self.postMessage({ type: "done", text: result.data.text });
+      if (!cancelled) self.postMessage({ type: "done", text: result.data.text, confidence: result.data.confidence });
     } finally { await worker.terminate(); }
   } catch {
     if (!cancelled) self.postMessage({ type: "error" });

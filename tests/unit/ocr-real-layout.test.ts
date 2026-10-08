@@ -48,3 +48,16 @@ Kvito Nr. 3/4/12345
   expect(result.productPrice).toEqual({ value: "179.49", state: "uncertain" });
   expect(result.receiptTotal.value).toBe("179.50");
 });
+
+it("ignores a noisy rounded payment row as a product and keeps an unreadable total unconfirmed", () => {
+  const result = parseReceiptText(`x UAB „Bandymų prekyba“ |
+  TEST60420CK Indukcinė
+  kaitlentė, BandymųGamintojas 179,49 A
+  Mokėti 179,49
+  Bl Mokėti suapvalinus 180, OO B=
+  Kvito Nr. 3/4/12345`, "2026-10-08");
+  expect(result.seller.value).toBe("UAB Bandymų prekyba");
+  expect(result.productName.value).toBe("BandymųGamintojas TEST60420CK Indukcinė kaitlentė");
+  expect(result.productPrice.value).toBe("179.49");
+  expect(result.receiptTotal.state).toBe("absent");
+});

@@ -21,3 +21,16 @@ it("keeps conflicting OCR values visible without selecting one", () => {
     value: "", state: "uncertain", candidates: ["TEST60420CK Kaitlentė", "TEST6042OCK Kaitlentė"],
   });
 });
+
+it("prefers a full receipt identifier over its suffix while requiring review", () => {
+  const first = parseReceiptText("Kvito numeris 12345", "2026-10-08");
+  const second = parseReceiptText("Kvito Nr. 3/4/12345", "2026-10-08");
+  expect(mergeReceiptSuggestions(first, second).receiptNumber).toEqual({
+    value: "3/4/12345", state: "uncertain", candidates: ["12345", "3/4/12345"],
+  });
+});
+
+it("retries a complete-looking scan when a model code needs another reading", () => {
+  const parsed = parseReceiptText("UAB Bandymų prekyba\nTEST60420CK Kaitlentė 179,49 A\nData 2024-01-30\nKvito Nr. 3/4/12345", "2026-10-08");
+  expect(needsAlternateScan(parsed)).toBe(true);
+});

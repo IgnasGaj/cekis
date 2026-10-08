@@ -16,25 +16,31 @@ export async function prepareReceiptImage(file: Blob, variant: "primary" | "fall
       mask[i] = (r + g + b) / 3 > 150 && Math.max(r, g, b) - Math.min(r, g, b) < 28 ? 1 : 0;
     }
     let best = { count: 0, left: 0, top: 0, right: sample.width - 1, bottom: sample.height - 1 };
+    let bestRows: { left: Int32Array; right: Int32Array } | null = null;
     const queue = new Int32Array(mask.length);
+    const rowLeft = new Int32Array(sample.height);
+    const rowRight = new Int32Array(sample.height);
     for (let start = 0; start < mask.length; start++) {
       if (mask[start] !== 1) continue;
       let head = 0, tail = 1; queue[0] = start; mask[start] = 2;
       let left = sample.width, top = sample.height, right = 0, bottom = 0;
+      rowLeft.fill(sample.width); rowRight.fill(-1);
       while (head < tail) {
         const index = queue[head++], x = index % sample.width, y = Math.floor(index / sample.width);
         left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y);
+        rowLeft[y] = Math.min(rowLeft[y], x); rowRight[y] = Math.max(rowRight[y], x);
         for (const next of [x > 0 ? index - 1 : -1, x < sample.width - 1 ? index + 1 : -1, y > 0 ? index - sample.width : -1, y < sample.height - 1 ? index + sample.width : -1]) {
           if (next >= 0 && mask[next] === 1) { mask[next] = 2; queue[tail++] = next; }
         }
       }
-      if (tail > best.count) best = { count: tail, left, top, right, bottom };
+      if (tail > best.count) { best = { count: tail, left, top, right, bottom }; bestRows = { left: rowLeft.slice(), right: rowRight.slice() }; }
     }
     let x = 0, y = 0, width = image.width, height = image.height;
     const boxArea = (best.right - best.left + 1) * (best.bottom - best.top + 1);
-    if (variant === "primary" && best.count > mask.length * 0.18 && best.count / boxArea > 0.55 && boxArea < mask.length * 0.9) {
-      // Keep a margin outside the detected paper: text may reach its edge.
-      const pad = Math.ceil(8 / scale);
+    const paperDetected = best.count > mask.length * 0.18 && best.count / boxArea > 0.55 && boxArea < mask.length * 0.9;
+    if (paperDetected) {
+      // The primary masks the background; the alternate retains more context for segmentation.
+      const pad = Math.ceil((variant === "primary" ? 1 : 8) / scale);
       x = Math.max(0, Math.floor(best.left / scale) - pad); y = Math.max(0, Math.floor(best.top / scale) - pad);
       width = Math.min(image.width - x, Math.ceil((best.right + 1) / scale) + pad - x);
       height = Math.min(image.height - y, Math.ceil((best.bottom + 1) / scale) + pad - y);
@@ -46,7 +52,22 @@ export async function prepareReceiptImage(file: Blob, variant: "primary" | "fall
     if (!target) throw new Error("Vaizdo apdorojimas neprieinamas.");
     target.fillStyle = "white"; target.fillRect(0, 0, output.width, output.height);
     target.drawImage(image, x, y, width, height, 0, 0, output.width, output.height);
-    if (variant === "primary") {
+    if (variant === "primary" || paperDetected) {
+      if (variant === "primary" && paperDetected && bestRows) {
+        // The paper can taper or curl. Blank the cloth outside each detected paper row.
+        target.fillStyle = "white";
+        for (let outputY = 0; outputY < output.height; outputY++) {
+          const sourceY = y + (outputY + 0.5) * height / output.height;
+          const row = Math.min(sample.height - 1, Math.floor(sourceY * sample.height / image.height));
+          const left = bestRows.left[row], right = bestRows.right[row];
+          if (right < left) { target.fillRect(0, outputY, output.width, 1); continue; }
+          const samplePad = 1;
+          const leftX = ((Math.max(0, left - samplePad) * image.width / sample.width) - x) * output.width / width;
+          const rightX = ((Math.min(sample.width, right + samplePad + 1) * image.width / sample.width) - x) * output.width / width;
+          if (leftX > 0) target.fillRect(0, outputY, leftX, 1);
+          if (rightX < output.width) target.fillRect(rightX, outputY, output.width - rightX, 1);
+        }
+      }
       const data = target.getImageData(0, 0, output.width, output.height);
       // Increase faded thermal-print contrast without destructive hard thresholding.
       for (let i = 0; i < data.data.length; i += 4) {

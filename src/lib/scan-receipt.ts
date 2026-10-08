@@ -1,41 +1,45 @@
 import { prepareReceiptImage } from "./receipt-image";
-import { parseReceiptText, suggestionValues, type ReceiptSuggestions, type Suggestion } from "./ocr-parser";
+import { hasModelCode, parseReceiptText, suggestionValues, type ReceiptSuggestions, type Suggestion } from "./ocr-parser";
 
-async function recognize(bytes: ArrayBuffer, signal: AbortSignal, progress: (value: number) => void): Promise<string> {
+async function recognize(bytes: ArrayBuffer, mode: "auto" | "block", signal: AbortSignal, progress: (value: number) => void): Promise<{ text: string; confidence: number }> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try { worker = new Worker(new URL("../workers/receipt-ocr.worker.ts", import.meta.url), { type: "module" }); }
     catch { reject(new Error("Nuskaitymo modulis nepasiekiamas. Bandyk dar kartą arba įvesk rankiniu būdu.")); return; }
     let settled = false;
-    const finish = (error?: Error, text = "") => {
+    const finish = (error?: Error, text = "", confidence = 0) => {
       if (settled) return;
       settled = true; clearTimeout(timeout); signal.removeEventListener("abort", abort);
       worker.postMessage({ type: "cancel" });
       const deadline = window.setTimeout(() => worker.terminate(), 1000);
       worker.addEventListener("message", (event) => { if (event.data.type === "cancelled") { clearTimeout(deadline); worker.terminate(); } });
-      if (error) reject(error); else resolve(text);
+      if (error) reject(error); else resolve({ text, confidence });
     };
     const abort = () => finish(new DOMException("Nuskaitymas atšauktas.", "AbortError"));
     const timeout = window.setTimeout(() => finish(new Error("Nuskaitymas užtruko per ilgai. Bandyk dar kartą arba įvesk rankiniu būdu.")), 45000);
     signal.addEventListener("abort", abort, { once: true });
-    worker.onmessage = (event: MessageEvent<{ type: string; text?: string; progress?: number }>) => {
+    worker.onmessage = (event: MessageEvent<{ type: string; text?: string; confidence?: number; progress?: number }>) => {
       if (settled) return;
       if (event.data.type === "progress") progress(Math.round(Math.max(0, Math.min(1, event.data.progress ?? 0)) * 100));
-      if (event.data.type === "done") finish(undefined, event.data.text);
+      if (event.data.type === "done") finish(undefined, event.data.text, event.data.confidence);
       if (event.data.type === "error") finish(new Error("Nepavyko nuskaityti čekio. Bandyk dar kartą arba įvesk rankiniu būdu."));
     };
     worker.onerror = () => finish(new Error("Nuskaitymo modulis nepasiekiamas. Bandyk dar kartą arba įvesk rankiniu būdu."));
-    try { worker.postMessage({ type: "start", bytes }, [bytes]); }
+    try { worker.postMessage({ type: "start", bytes, mode }, [bytes]); }
     catch { finish(new Error("Nuskaitymo pradėti nepavyko. Bandyk dar kartą arba įvesk rankiniu būdu.")); }
   });
 }
 
 export function needsAlternateScan(suggestions: ReceiptSuggestions) {
-  const core = [suggestions.seller, suggestions.productName, suggestions.productPrice];
-  if (core.some((field) => field.state !== "strong" || !field.value)) return true;
   return [suggestions.seller, suggestions.productName, suggestions.productPrice, suggestions.purchaseDate, suggestions.receiptNumber]
-    .filter((field) => field.state === "strong" && field.value).length < 4;
+    .some((field) => field.state !== "strong" || !field.value) || hasModelCode(suggestions.productName.value);
+}
+
+function reflectRecognitionConfidence(suggestions: ReceiptSuggestions, confidence: number): ReceiptSuggestions {
+  if (confidence >= 70) return suggestions;
+  return Object.fromEntries(Object.entries(suggestions).map(([key, field]) => [key,
+    field.state === "strong" ? { ...field, state: "uncertain" } : field])) as ReceiptSuggestions;
 }
 
 function mergeField(first: Suggestion, second: Suggestion): Suggestion {
@@ -47,11 +51,22 @@ function mergeField(first: Suggestion, second: Suggestion): Suggestion {
   return { value: options[0], state: first.state === "strong" || second.state === "strong" ? "strong" : "uncertain" };
 }
 
+function mergeReceiptNumber(first: Suggestion, second: Suggestion): Suggestion {
+  const options = [...new Set([...suggestionValues(first), ...suggestionValues(second)])];
+  if (options.length === 2) {
+    const [shorter, longer] = [...options].sort((a, b) => a.length - b.length);
+    if (longer.endsWith(`/${shorter}`) || longer.endsWith(`-${shorter}`)) {
+      return { value: longer, state: "uncertain", candidates: options };
+    }
+  }
+  return mergeField(first, second);
+}
+
 export function mergeReceiptSuggestions(first: ReceiptSuggestions, second: ReceiptSuggestions): ReceiptSuggestions {
   return {
     seller: mergeField(first.seller, second.seller), purchaseDate: mergeField(first.purchaseDate, second.purchaseDate),
     receiptTotal: mergeField(first.receiptTotal, second.receiptTotal), receiptCurrency: mergeField(first.receiptCurrency, second.receiptCurrency),
-    receiptNumber: mergeField(first.receiptNumber, second.receiptNumber), productName: mergeField(first.productName, second.productName),
+    receiptNumber: mergeReceiptNumber(first.receiptNumber, second.receiptNumber), productName: mergeField(first.productName, second.productName),
     productPrice: mergeField(first.productPrice, second.productPrice),
   };
 }
@@ -59,14 +74,16 @@ export function mergeReceiptSuggestions(first: ReceiptSuggestions, second: Recei
 export async function scanReceipt(file: Blob, today: string, signal: AbortSignal, progress: (value: number) => void): Promise<ReceiptSuggestions> {
   const firstBytes = await prepareReceiptImage(file);
   signal.throwIfAborted();
-  const first = parseReceiptText(await recognize(firstBytes, signal, (value) => progress(Math.round(value * 0.75))), today);
+  const firstOcr = await recognize(firstBytes, "auto", signal, (value) => progress(Math.round(value * 0.75)));
+  const first = reflectRecognitionConfidence(parseReceiptText(firstOcr.text, today), firstOcr.confidence);
   signal.throwIfAborted();
   if (!needsAlternateScan(first)) { progress(100); return first; }
-  // Only weak scans get one sequential pass without cropping or contrast changes.
+  // A single alternate segmentation can recover fields lost by the primary pass.
   try {
     const alternateBytes = await prepareReceiptImage(file, "fallback");
     signal.throwIfAborted();
-    const second = parseReceiptText(await recognize(alternateBytes, signal, (value) => progress(75 + Math.round(value * 0.25))), today);
+    const secondOcr = await recognize(alternateBytes, "block", signal, (value) => progress(75 + Math.round(value * 0.25)));
+    const second = reflectRecognitionConfidence(parseReceiptText(secondOcr.text, today), secondOcr.confidence);
     signal.throwIfAborted();
     progress(100);
     return mergeReceiptSuggestions(first, second);

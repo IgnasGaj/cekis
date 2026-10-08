@@ -805,7 +805,7 @@ async function anonymousReceiptPhoto() {
 
 async function wrappedReceiptPhoto() {
   const lines = ["Pavyzdžio salonas", "UAB Bandymų technika", "TEST60420CK", "Bandymų indukcinė kaitlentė", "179,49 A", "Mokėti 179,49", "Mokėti suapvalinus 179,50", "Kvito Nr. 3/4/12345", "2024-01-30 12:41"];
-  const image = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1500"><rect width="100%" height="100%" fill="#645c4c"/><rect x="130" y="80" width="740" height="1340" fill="#eeeae1"/><g font-family="DejaVu Sans" font-size="32" fill="#303030">${lines.map((line, index) => `<text x="180" y="${180 + index * 115}">${line}</text>`).join("")}</g></svg>`;
+  const image = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1500"><defs><pattern id="cloth" width="18" height="18" patternUnits="userSpaceOnUse"><rect width="18" height="18" fill="#645c4c"/><path d="M0 4H18M3 0V18M12 0V18" stroke="#a79a82" stroke-width="3"/></pattern></defs><rect width="100%" height="100%" fill="url(#cloth)"/><rect x="130" y="80" width="740" height="1340" fill="#eeeae1"/><g font-family="DejaVu Sans" font-size="32" fill="#303030">${lines.map((line, index) => `<text x="180" y="${180 + index * 115}">${line}</text>`).join("")}</g></svg>`;
   return sharp(Buffer.from(image)).jpeg({ quality: 84 }).toBuffer();
 }
 
