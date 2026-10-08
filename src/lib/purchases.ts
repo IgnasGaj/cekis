@@ -60,6 +60,8 @@ export function listHref(params: ReturnType<typeof listParams>) {
 
 export async function listPurchases(params: ReturnType<typeof listParams>) {
   const { user } = await requireSession();
+  if (process.env.CEKIS_TEST_WORKER === "true" && (await headers()).get("x-cekis-test-list-failure") === "1")
+    throw new Error("Disposable purchase retrieval failure");
   const today = todayInVilnius();
   // Backslashes escape LIKE's wildcard symbols, so a typed % or _ stays literal.
   const escaped = params.q.replace(/[\\%_]/g, (character) => `\\${character}`);
@@ -81,9 +83,18 @@ export async function listPurchases(params: ReturnType<typeof listParams>) {
     // so always move strictly toward page 1 to avoid a redirect loop.
     const [{ total }] = await db.select({ total: count() }).from(purchase).where(where);
     const lastPage = Math.max(1, Math.ceil(total / 50));
-    return { rows: [], hasNext: false, redirectPage: Math.min(params.page - 1, lastPage), today };
+    return { rows: [], hasNext: false, redirectPage: Math.min(params.page - 1, lastPage), today, vaultEmpty: false };
   }
-  return { rows: rows.slice(0, 50), hasNext: rows.length > 50, redirectPage: null, today };
+  let vaultEmpty = false;
+  if (rows.length === 0) {
+    if (!params.q && params.warranty === "all") vaultEmpty = true;
+    else {
+      const [{ total }] = await db.select({ total: count() }).from(purchase)
+        .where(and(eq(purchase.ownerId, user.id), isNull(purchase.deletedAt)));
+      vaultEmpty = total === 0;
+    }
+  }
+  return { rows: rows.slice(0, 50), hasNext: rows.length > 50, redirectPage: null, today, vaultEmpty };
 }
 
 export async function getPurchase(id: string) {

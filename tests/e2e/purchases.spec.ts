@@ -53,7 +53,7 @@ test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ b
   await expect(page).toHaveURL(/\/prisijungti/);
   await signIn(page, emailA);
   await page.getByRole("link", { name: "Pirkiniai", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Dar neturi pirkinių" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dar neturite pirkinių" })).toBeVisible();
   await page.getByRole("link", { name: "Pridėti pirkinį" }).first().click();
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText("Įvesk prekės pavadinimą")).toBeVisible();
@@ -108,7 +108,7 @@ test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ b
   await page.goto(`/pirkiniai/${id}/redaguoti`);
   await expect(page.getByRole("heading", { name: "Pirkinys nerastas" })).toBeVisible();
   await page.goto("/pirkiniai?q=%C4%8D%C4%97kis");
-  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dar neturite pirkinių" })).toBeVisible();
   await page.goto("/pirkiniai/naujas");
   await page.getByLabel("Prekės pavadinimas").fill("Kita prekė");
   await page.getByLabel("Pardavėjas").fill("Kitas pardavėjas");
@@ -160,7 +160,7 @@ test("paieška traktuoja šablono ženklus pažodžiui, rikiuoja pagal datą ir 
     await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+/);
   }
   await page.goto("/pirkiniai?q=_%25&sort=oldest");
-  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pagal paiešką pirkinių nerasta" })).toBeVisible();
   await page.getByLabel("Ieškoti pagal prekę arba pardavėją").fill("Čia");
   await page.getByRole("button", { name: "Rodyti" }).click();
   await expect(page.getByText("Kava")).toBeVisible();
@@ -334,13 +334,13 @@ test("50 įrašų puslapiai nepaslepia likusių pirkinių", async ({ page }) => 
   await page.getByRole("button", { name: "Ištrinti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\?sort=oldest&busena=istrinta$/);
   await expect(page.locator(".purchase-card")).toHaveCount(50);
-  await expect(page.getByRole("heading", { name: "Dar neturi pirkinių" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Dar neturite pirkinių" })).toHaveCount(0);
   await page.goto("/pirkiniai?page=999&sort=oldest");
   await expect(page).toHaveURL(/\/pirkiniai\?sort=oldest$/);
   await expect(page.locator(".purchase-card")).toHaveCount(50);
   await page.goto("/pirkiniai?page=999&q=nerasta&sort=oldest");
   await expect(page).toHaveURL(/\/pirkiniai\?q=nerasta&sort=oldest$/);
-  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pagal paiešką pirkinių nerasta" })).toBeVisible();
   await page.goto("/pirkiniai?sort=oldest");
   await expect(page.locator(".purchase-card")).toHaveCount(50);
 });
@@ -357,7 +357,7 @@ test("filtruoto paskutinio puslapio ištrynimas ir tikras tuščias sąrašas", 
   await signIn(b, emailB);
   await a.goto("/pirkiniai?page=999");
   await expect(a).toHaveURL(/\/pirkiniai$/);
-  await expect(a.getByRole("heading", { name: "Dar neturi pirkinių" })).toBeVisible();
+  await expect(a.getByRole("heading", { name: "Dar neturite pirkinių" })).toBeVisible();
   await withAppDb(async (client) => {
     const users = await client.query('SELECT id, email FROM "user" WHERE email = ANY($1)', [[emailA, emailB]]);
     const ids = new Map(users.rows.map((row) => [row.email, row.id]));
@@ -379,10 +379,10 @@ test("filtruoto paskutinio puslapio ištrynimas ir tikras tuščias sąrašas", 
   await expect(a).toHaveURL(/\/pirkiniai\?q=Filtruota&sort=oldest$/);
   await a.goto("/pirkiniai?q=neatitinka&page=999");
   await expect(a).toHaveURL(/\/pirkiniai\?q=neatitinka$/);
-  await expect(a.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(a.getByRole("heading", { name: "Pagal paiešką pirkinių nerasta" })).toBeVisible();
   await a.goto("/pirkiniai?q=Kito&page=999");
   await expect(a).toHaveURL(/\/pirkiniai\?q=Kito$/);
-  await expect(a.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(a.getByRole("heading", { name: "Pagal paiešką pirkinių nerasta" })).toBeVisible();
   await b.goto("/pirkiniai?page=999");
   await expect(b).toHaveURL(/\/pirkiniai\?page=2$/);
   await expect(b.locator(".purchase-card")).toHaveCount(1);
@@ -512,7 +512,7 @@ test("garantiją ir jos filtrą galima valdyti klaviatūra", async ({ page }) =>
   await expect(filter).toHaveValue("expired");
   await tabTo(page, page.getByRole("button", { name: "Rodyti" }));
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Pirkinių nerasta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pagal garantijos filtrą pirkinių nerasta" })).toBeVisible();
   await tabTo(page, page.getByRole("link", { name: "Išvalyti filtrus" }));
   await page.keyboard.press("Enter");
   await expect(page.locator(".purchase-card")).toHaveCount(1);

@@ -10,7 +10,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   const search = await searchParams;
   const single = (key: string) => typeof search[key] === "string" ? search[key] as string : undefined;
   const params = listParams({ q: single("q"), sort: single("sort"), warranty: single("warranty"), page: single("page") });
-  const { rows, hasNext, redirectPage, today } = await listPurchases(params);
+  const { rows, hasNext, redirectPage, today, vaultEmpty } = await listPurchases(params);
   if (redirectPage !== null) {
     const target = listHref({ ...params, page: redirectPage });
     redirect(single("busena") === "istrinta" ? `${target}${target.includes("?") ? "&" : "?"}busena=istrinta` : target);
@@ -21,12 +21,17 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   if (params.warranty !== "all") context.set("warranty", params.warranty);
   if (params.page > 1) context.set("page", String(params.page));
   const suffix = context.size ? `?${context}` : "";
+  const filterLabel = {
+    all: "Visi", valid: "Galioja", expired: "Pasibaigė", soon: "Per artimiausias 30 dienų",
+    upcoming90: "Per artimiausias 90 dienų", unknown: "Garantija nenurodyta", none: "Pažymėta: garantijos nėra",
+  }[params.warranty];
   return <PurchaseShell>
     <section className="page-heading heading-with-action"><div><h1>Mano pirkiniai</h1><p>Čia saugomi tavo pridėti pirkiniai.</p></div><Link className="small-action" href="/pirkiniai/naujas">Pridėti pirkinį</Link></section>
     {single("busena") === "istrinta" && <p className="notice" role="status">Pirkinys ištrintas</p>}
     <form className="list-filters" action="/pirkiniai" method="get">
       <label htmlFor="purchase-search">Ieškoti pagal prekę arba pardavėją</label>
       <input id="purchase-search" name="q" maxLength={200} defaultValue={params.q} type="search" />
+      {params.q && <Link className="search-clear" href={listHref({ ...params, q: "", page: 1 })}>Išvalyti paiešką</Link>}
       <label htmlFor="purchase-warranty">Garantijos filtras</label>
       <select id="purchase-warranty" name="warranty" defaultValue={params.warranty}><option value="all">Visi</option><option value="valid">Galioja</option><option value="expired">Pasibaigė</option><option value="soon">Per artimiausias 30 dienų</option><option value="upcoming90">Per artimiausias 90 dienų</option><option value="unknown">Garantija nenurodyta</option><option value="none">Pažymėta: garantijos nėra</option></select>
       <label htmlFor="purchase-sort">Rikiuoti pirkinius</label>
@@ -36,8 +41,8 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
     {rows.length ? <div className="purchase-list">{rows.map((row) => <Link className="purchase-card" href={`/pirkiniai/${row.id}${suffix}`} key={row.id}>
       <strong>{row.productName}</strong><span>{row.seller}</span><span>{displayDate(row.purchaseDate)}{row.price && row.currency ? ` · ${displayPrice(row.price, row.currency)}` : ""}</span>
       <span className="warranty-card-status">{(() => { const status = warrantyStatus({ warrantyState: row.warrantyState as "unknown" | "none" | "known", warrantyEndDate: row.warrantyEndDate }, today); return `${status.label}${row.warrantyEndDate ? ` · ${displayDate(row.warrantyEndDate)}` : ""}${status.days !== null && status.days >= 0 ? ` · ${dayPhrase(status.days)}` : ""}`; })()}</span>
-    </Link>)}</div> : <section className="empty-card compact-empty"><h2>{params.q || params.warranty !== "all" ? "Pirkinių nerasta" : "Dar neturi pirkinių"}</h2><p>{params.q || params.warranty !== "all" ? "Pabandyk kitą paiešką arba išvalyk filtrus." : "Pridėk pirmą pirkinį rankiniu būdu."}</p>
-      <Link className="secondary-button" href={params.q || params.warranty !== "all" ? "/pirkiniai" : "/pirkiniai/naujas"}>{params.q || params.warranty !== "all" ? "Išvalyti filtrus" : "Pridėti pirkinį"}</Link>
+    </Link>)}</div> : <section className="empty-card compact-empty"><h2>{vaultEmpty ? "Dar neturite pirkinių" : params.q ? "Pagal paiešką pirkinių nerasta" : "Pagal garantijos filtrą pirkinių nerasta"}</h2><p>{vaultEmpty ? "Pridėk pirmą čekį ir išsaugok pirkinį." : params.q ? "Pabandyk kitą prekės ar pardavėjo pavadinimą arba išvalyk paiešką." : `Filtras „${filterLabel}“ neatitiko nė vieno pirkinio.`}</p>
+      <Link className="secondary-button" href={vaultEmpty ? "/prideti" : params.q ? listHref({ ...params, q: "", page: 1 }) : listHref({ ...params, warranty: "all", page: 1 })}>{vaultEmpty ? "Pridėti čekį" : params.q ? "Išvalyti paiešką" : "Išvalyti filtrus"}</Link>
     </section>}
     {(params.page > 1 || hasNext) && <nav className="pagination" aria-label="Pirkinių puslapiai">
       {params.page > 1 && <Link href={listHref({ ...params, page: params.page - 1 })}>Ankstesnis puslapis</Link>}
