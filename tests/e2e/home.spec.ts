@@ -150,9 +150,8 @@ test("pradžios duomenys atsinaujina sukūrus, pakeitus ir ištrynus pirkinį", 
   await expect(page.getByText("Per artimiausias 90 dienų garantijos nesibaigia.")).toBeVisible();
   await expect(page.locator('[aria-labelledby="recent-title"] .purchase-card')).toContainText("Keičiamas pirkinys");
   await page.goto(`/pirkiniai/${id}/redaguoti`);
-  await page.getByLabel("Garantijos būsena").selectOption("known");
-  await page.getByLabel("Garantijos pabaigos data").fill(dateOffset(todayInVilnius(), 30));
-  await page.getByLabel(/Patvirtinu garantijos pabaigos datą/).check();
+  await page.getByLabel("Pirkimo data").fill(dateOffset(todayInVilnius(), -160));
+  await page.getByLabel("Garantijos trukmė").selectOption("6");
   await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
   await expect(page.getByRole("heading", { name: "Keičiamas pirkinys" })).toBeVisible();
   await page.getByRole("link", { name: "Pradžia" }).click();

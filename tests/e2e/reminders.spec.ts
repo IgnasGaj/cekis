@@ -39,10 +39,10 @@ async function signIn(page:Page,email:string) {
   await page.goto(link!);
   await expect(page).toHaveURL(/\/pradzia/);
 }
-async function makePurchase(page:Page, name:string, endDate=plusDays(today,30)) {
+async function makePurchase(page:Page, name:string) {
   const response = await page.request.post("/api/purchases",{ headers:{Origin:process.env.APP_URL!},data:{
-    key:randomUUID(),fields:{productName:name,seller:"Bandomoji parduotuvė",purchaseDate:today,price:"",currency:"EUR",notes:""},
-    warranty:{warrantyState:"known",warrantyEndDate:endDate,warrantyDurationMonths:"",warrantySource:"date",warrantyConfirmed:true},
+    key:randomUUID(),fields:{productName:name,seller:"Bandomoji parduotuvė",purchaseDate:plusDays(today,-160),price:"",currency:"EUR",notes:""},
+    warranty:{warrantyState:"known",warrantyEndDate:"",warrantyDurationMonths:"6",warrantySource:"duration",warrantyConfirmed:true},
   }});
   expect(response.status()).toBe(200);
   return (await response.json() as {id:string}).id;
@@ -59,6 +59,31 @@ async function enable(page:Page) {
   await page.getByRole("button",{name:"Išsaugoti priminimus"}).click();
   await expect(page.getByText("Priminimų nustatymai išsaugoti.")).toBeVisible();
 }
+
+test("trukmės pakeitimas pakeičia priminimo darbą, o nežinoma būsena jį atšaukia",async({page})=>{
+  await signIn(page,`duration-reminder-${randomUUID()}@example.test`);
+  await enable(page);
+  const id=await makePurchase(page,"Keičiama trukmė");
+  const original=await db(async(client)=>(await client.query("SELECT identity,end_date::text,status FROM warranty_reminder WHERE purchase_id=$1",[id])).rows[0]);
+  expect(original.status).toBe("pending");
+  await page.goto(`/pirkiniai/${id}/redaguoti`);
+  await page.getByLabel("Garantijos trukmė").selectOption("12");
+  await page.getByRole("button",{name:"Išsaugoti pakeitimus"}).click();
+  await expect(page.getByText("Pakeitimai išsaugoti")).toBeVisible();
+  const changed=await db(async(client)=>(await client.query("SELECT identity,end_date::text,status FROM warranty_reminder WHERE purchase_id=$1 ORDER BY created_at",[id])).rows);
+  expect(changed).toHaveLength(2);
+  expect(changed.find((row)=>row.identity===original.identity)?.status).toBe("cancelled");
+  expect(changed.find((row)=>row.identity!==original.identity)?.status).toBe("pending");
+  await page.goto(`/pirkiniai/${id}/redaguoti`);
+  await page.getByRole("button",{name:"Išsaugoti pakeitimus"}).click();
+  await expect(page.getByText("Pakeitimai išsaugoti")).toBeVisible();
+  expect(await db(async(client)=>(await client.query("SELECT count(*)::int AS n FROM warranty_reminder WHERE purchase_id=$1",[id])).rows[0].n)).toBe(2);
+  await page.goto(`/pirkiniai/${id}/redaguoti`);
+  await page.getByLabel("Garantijos būsena").selectOption("unknown");
+  await page.getByRole("button",{name:"Išsaugoti pakeitimus"}).click();
+  await expect(page.getByText("Pakeitimai išsaugoti")).toBeVisible();
+  expect(await db(async(client)=>(await client.query("SELECT count(*)::int AS n FROM warranty_reminder WHERE purchase_id=$1 AND status='pending'",[id])).rows[0].n)).toBe(0);
+});
 
 async function holdAction(page:Page,path:string) {
   let release!:()=>void, completed!:()=>void, delivered!:()=>void;
@@ -96,7 +121,8 @@ test("patvirtintas gavėjas, išsaugotas priminimas ir tikras vietinis SMTP lai�
   const detail=await fetch(`http://localhost:1080/api/v1/message/${mails[0].ID}`);
   const message=await detail.json() as {Text:string;HTML:string};
   expect(message.Text).toContain("Ilgas <garantijos> pavadinimas");
-  expect(message.Text).toContain(`Garantijos pabaiga: ${plusDays(today,30)}`);
+  const expiry=await db(async(client)=>(await client.query("SELECT warranty_end_date::text AS expiry FROM purchase WHERE id=$1",[id])).rows[0].expiry as string);
+  expect(message.Text).toContain(`Garantijos pabaiga: ${expiry}`);
   expect(message.Text).toContain(`${process.env.APP_URL}/pirkiniai/${id}`);
   expect(message.Text).toContain("Priminimas pagal jūsų išsaugotą garantijos datą.");
   expect(message.HTML).toContain("&lt;garantijos&gt;");

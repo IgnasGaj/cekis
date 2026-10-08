@@ -2,7 +2,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import type { PurchaseFields } from "@/lib/purchase-validation";
 import type { FormState } from "./actions";
-import { WarrantyEditor, draftFromWarranty } from "@/components/warranty-editor";
+import { WarrantyEditor, draftFromWarranty, newWarrantyDraft } from "@/components/warranty-editor";
 import { emptyWarranty, type WarrantyInput } from "@/lib/warranty";
 
 type Props = { initial: PurchaseFields; action: (state: FormState, form: FormData) => Promise<FormState>; cancelHref: string; submissionKey?: string; edit?: boolean; maxDate: string; warranty?: WarrantyInput; revision?: number };
@@ -13,7 +13,7 @@ const labels: Record<keyof PurchaseFields, string> = {
 export function PurchaseForm({ initial, action, cancelHref, submissionKey, edit = false, maxDate, warranty = emptyWarranty, revision }: Props) {
   const [state, formAction, pending] = useActionState(action, { errors: {} });
   const [values, setValues] = useState(initial);
-  const [warrantyDraft, setWarrantyDraft] = useState(() => draftFromWarranty(warranty));
+  const [warrantyDraft, setWarrantyDraft] = useState(() => edit ? draftFromWarranty(warranty) : newWarrantyDraft());
   const [dismissed, setDismissed] = useState<{ state: FormState; keys: string[] }>({ state: { errors: {} }, keys: [] });
   const errors = dismissed.state === state ? Object.fromEntries(Object.entries(state.errors).filter(([key]) => !dismissed.keys.includes(key))) as FormState["errors"] : state.errors;
   const summary = useRef<HTMLDivElement>(null);

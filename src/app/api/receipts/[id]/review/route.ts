@@ -25,8 +25,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const warrantySupplied = warrantyFields.some((key) => Object.hasOwn(body, key)) || Object.hasOwn(body, "warrantyConfirmed");
   if (warrantySupplied && (warrantyFields.some((key) => typeof body[key] !== "string") || typeof body.warrantyConfirmed !== "boolean"))
     return Response.json({ errors: { warranty: "Patikrink garantijos informaciją." } }, { status: 400 });
-  const warranty = warrantySupplied ? parseWarranty(body as WarrantyDraft, parsed.value.purchaseDate) : null;
-  if (warranty && !warranty.value) return Response.json({ errors: { warranty: warranty.error } }, { status: 400 });
   const expectedRevision = body.expectedRevision;
   if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) return Response.json({ error: "Atnaujink puslapį ir bandyk dar kartą." }, { status: 400 });
   const client = await pool.connect();
@@ -40,6 +38,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!linked.rowCount) { await client.query("ROLLBACK"); return Response.json({ error: "Čekis nerastas arba nebepridėtas prie pirkinio." }, { status: 404 }); }
     const value = parsed.value;
     const current = existing.rows[0];
+    const warranty = warrantySupplied ? parseWarranty(body as WarrantyDraft, value.purchaseDate, {
+      warrantyState: current.warranty_state, warrantyEndDate: dateText(current.warranty_end_date),
+      warrantyDurationMonths: current.warranty_duration_months, warrantySource: current.warranty_source,
+    }) : null;
+    if (warranty && !warranty.value) { await client.query("ROLLBACK"); return Response.json({ errors: { warranty: warranty.error } }, { status: 400 }); }
     if (expectedRevision !== current.revision) {
       const unchanged = current.product_name === value.productName && current.seller === value.seller && dateText(current.purchase_date) === value.purchaseDate &&
         current.price === value.price && current.currency === value.currency && current.notes === value.notes && linked.rows[0].receipt_number === (receiptNumber.trim() || null) &&
