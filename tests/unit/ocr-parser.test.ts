@@ -16,6 +16,19 @@ describe("conservative receipt parser", () => {
   it.each(["2026-10-06", "2026.10.06", "06.10.2026", "06/10/2026"])("accepts date %s", (date) => {
     expect(parse(`Parduotuvė\nData: ${date}`).purchaseDate.value).toBe("2026-10-06");
   });
+  it.each(["2026 - 10 - 06 12:40:06", "2026–10–06 12:40", "06 . 10 . 2026 12:40", "2026 10 06 12:40:06"])("accepts conservative OCR timestamp %s", (date) => {
+    expect(parse(`CR-000012345 ${date}\n--- Informacija kvito patikrinimui ---`).purchaseDate.value).toBe("2026-10-06");
+  });
+  it("searches the complete OCR text for a footer date after noisy lines", () => {
+    const text = ["UAB Pavyzdžio prekyba", ...Array.from({ length: 155 }, (_, i) => `triukšmo eilutė ${i}`), "CR-000012345 2026-09-28 12:11:28", "--- Informacija kvito patikrinimui ---"].join("\n");
+    expect(parse(text).purchaseDate).toEqual({ value: "2026-09-28", state: "strong" });
+  });
+  it("does not use warranty expiry as the purchase date", () => {
+    expect(parse("CR-000012345 2026-09-28 12:11:28\nGarantija galioja iki 2028-09-28").purchaseDate.value).toBe("2026-09-28");
+  });
+  it("does not infer a date from unseparated digits without a time", () => {
+    expect(parse("Kodas 2026 09 28").purchaseDate.state).toBe("absent");
+  });
   it("rejects impossible, future and card-expiry dates", () => {
     expect(parse("Data: 2026-02-30\nKortelė galioja 10/10/2025").purchaseDate.state).toBe("absent");
     expect(parse("Data: 2026-10-07").purchaseDate.state).toBe("absent");

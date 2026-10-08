@@ -74,22 +74,37 @@ export function mergeReceiptSuggestions(first: ReceiptSuggestions, second: Recei
 export async function scanReceipt(file: Blob, today: string, signal: AbortSignal, progress: (value: number) => void): Promise<ReceiptSuggestions> {
   const firstBytes = await prepareReceiptImage(file);
   signal.throwIfAborted();
-  const firstOcr = await recognize(firstBytes, "auto", signal, (value) => progress(Math.round(value * 0.75)));
+  const firstOcr = await recognize(firstBytes, "auto", signal, (value) => progress(Math.round(value * 0.5)));
   const first = reflectRecognitionConfidence(parseReceiptText(firstOcr.text, today), firstOcr.confidence);
   signal.throwIfAborted();
   if (!needsAlternateScan(first)) { progress(100); return first; }
-  // A single alternate segmentation can recover fields lost by the primary pass.
+  // An alternate segmentation can recover fields lost by the primary pass.
+  let combined = first;
   try {
     const alternateBytes = await prepareReceiptImage(file, "fallback");
     signal.throwIfAborted();
-    const secondOcr = await recognize(alternateBytes, "block", signal, (value) => progress(75 + Math.round(value * 0.25)));
+    const secondOcr = await recognize(alternateBytes, "block", signal, (value) => progress(50 + Math.round(value * 0.25)));
     const second = reflectRecognitionConfidence(parseReceiptText(secondOcr.text, today), secondOcr.confidence);
     signal.throwIfAborted();
-    progress(100);
-    return mergeReceiptSuggestions(first, second);
+    combined = mergeReceiptSuggestions(first, second);
   } catch (error) {
     if (signal.aborted) throw error;
-    progress(100);
-    return first;
   }
+  // Full-page OCR can stop before a faint footer. Retry only a bounded lower crop
+  // when neither full-page pass found any calendar date.
+  for (const [index, variant] of (["footer", "footer-bottom"] as const).entries()) {
+    if (combined.purchaseDate.state !== "absent") break;
+    try {
+      const footerBytes = await prepareReceiptImage(file, variant);
+      signal.throwIfAborted();
+      const footerOcr = await recognize(footerBytes, "block", signal, (value) => progress(75 + index * 12 + Math.round(value * 12)));
+      const footer = reflectRecognitionConfidence(parseReceiptText(footerOcr.text, today), footerOcr.confidence);
+      signal.throwIfAborted();
+      combined = { ...combined, purchaseDate: mergeField(combined.purchaseDate, footer.purchaseDate) };
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+  }
+  progress(100);
+  return combined;
 }

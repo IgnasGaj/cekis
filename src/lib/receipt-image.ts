@@ -1,5 +1,5 @@
 // Prepare a derived OCR image; the original File is always retained for upload.
-export async function prepareReceiptImage(file: Blob, variant: "primary" | "fallback" = "primary"): Promise<ArrayBuffer> {
+export async function prepareReceiptImage(file: Blob, variant: "primary" | "fallback" | "footer" | "footer-bottom" = "primary"): Promise<ArrayBuffer> {
   const image = await createImageBitmap(file).catch(() => { throw new Error("Nuotraukos atverti nepavyko. Pasirink JPEG arba PNG, arba įvesk duomenis rankiniu būdu."); });
   try {
     if (image.width > 6000 || image.height > 6000 || image.width * image.height > 16000000) throw new Error("Nuotrauka viršija 6000 px / 16 mln. taškų ribą.");
@@ -38,7 +38,15 @@ export async function prepareReceiptImage(file: Blob, variant: "primary" | "fall
     let x = 0, y = 0, width = image.width, height = image.height;
     const boxArea = (best.right - best.left + 1) * (best.bottom - best.top + 1);
     const paperDetected = best.count > mask.length * 0.18 && best.count / boxArea > 0.55 && boxArea < mask.length * 0.9;
-    if (paperDetected) {
+    if (variant === "footer" || variant === "footer-bottom") {
+      // Revisit the lower portion at higher resolution when page segmentation misses it.
+      // Keep the entire width so off-centre receipts and footer timestamps remain visible.
+      const paperTop = paperDetected ? Math.max(0, Math.floor(best.top / scale)) : 0;
+      const paperBottom = paperDetected ? Math.min(image.height, Math.ceil((best.bottom + 1) / scale)) : image.height;
+      const paperHeight = paperBottom - paperTop;
+      y = paperTop + Math.floor(paperHeight * (variant === "footer" ? 0.7 : 0.85));
+      height = Math.min(image.height - y, Math.max(1, Math.floor(paperHeight * (variant === "footer" ? 0.2 : 0.15))));
+    } else if (paperDetected) {
       // The primary masks the background; the alternate retains more context for segmentation.
       const pad = Math.ceil((variant === "primary" ? 1 : 8) / scale);
       x = Math.max(0, Math.floor(best.left / scale) - pad); y = Math.max(0, Math.floor(best.top / scale) - pad);
@@ -52,7 +60,7 @@ export async function prepareReceiptImage(file: Blob, variant: "primary" | "fall
     if (!target) throw new Error("Vaizdo apdorojimas neprieinamas.");
     target.fillStyle = "white"; target.fillRect(0, 0, output.width, output.height);
     target.drawImage(image, x, y, width, height, 0, 0, output.width, output.height);
-    if (variant === "primary" || paperDetected) {
+    if (variant === "primary" || variant === "footer" || variant === "footer-bottom" || paperDetected) {
       if (variant === "primary" && paperDetected && bestRows) {
         // The paper can taper or curl. Blank the cloth outside each detected paper row.
         target.fillStyle = "white";

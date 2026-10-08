@@ -21,14 +21,17 @@ export const hasModelCode = (value: string) => /\b(?=[A-Z0-9-]{5,}\b)(?=[A-Z0-9-
 const totalLabel = /^(?:mok[ėe]ti(?:\s+suapvalinus)?|i[šs]\s*viso|viso\s*mokėti|mokėtina|bendra\s*suma|total|amount\s*due)\b/i;
 const removeTotalNoise = (line: string) => line.replace(/^\S{1,3}\s+(?=mok[ėe]ti\b|i[šs]\s*viso\b|viso\s+mokėti\b|mokėtina\b|bendra\s+suma\b|total\b|amount\s+due\b)/iu, "");
 const numberLabel = /(?:(?:(?:č|c)ekio|kvito|dokumento|receipt|invoice)\s*(?:nr\.?|numeris|number|no\.?)|(?:nr\.?|no\.?)\s*(?:(?:č|c)ekio|kvito|receipt))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\-/]{2,29})/i;
-const datePattern = /(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)|(?<!\d)(\d{1,2})[-./](\d{1,2})[-./](\d{4})(?!\d)/g;
+const datePattern = /(?<![\p{L}\d])(\d{4})\s*[-./–—]\s*(\d{1,2})\s*[-./–—]\s*(\d{1,2})(?!\d)|(?<![\p{L}\d])(\d{1,2})\s*[-./–—]\s*(\d{1,2})\s*[-./–—]\s*(\d{4})(?!\d)/gu;
+// Missing separators are plausible only alongside a recognizable clock time.
+const spacedTimestampPattern = /(?<![\p{L}\d])(\d{4})\s+(\d{1,2})\s+(\d{1,2})\s+\d{1,2}[:.]\d{2}(?::\d{2})?(?!\d)/gu;
 const normalizeDate = (match: RegExpExecArray) => {
   const year = match[1] ?? match[6]; const month = match[2] ?? match[5]; const day = match[3] ?? match[4];
   return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 };
 
 export function parseReceiptText(text: string, today?: string): ReceiptSuggestions {
-  const lines = text.replace(/\r/g, "\n").split(/\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 150);
+  const allLines = text.replace(/\r/g, "\n").split(/\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const lines = allLines.slice(0, 150);
   if (!lines.length) return { seller: absent(), purchaseDate: absent(), receiptTotal: absent(), receiptCurrency: absent(), receiptNumber: absent(), productName: absent(), productPrice: absent() };
   const sellerLines = lines.slice(0, 14).map((line) => line.replace(/["„“|]/g, "").trim());
   const legalSeller = lines.slice(0, 14).map((line) => {
@@ -39,9 +42,9 @@ export function parseReceiptText(text: string, today?: string): ReceiptSuggestio
   const seller = legalSeller ? { value: legalSeller, state: "strong" as const } : pick(brandCandidates, brandCandidates.length === 1 && sellerLines.indexOf(brandCandidates[0]) < 3);
   const dates: string[] = [];
   const labeledDates: string[] = [];
-  for (const line of lines) {
-    if (/galioja|expiry|exp\.?\s*date|kortel|card/i.test(line)) continue;
-    for (const match of line.matchAll(datePattern)) {
+  for (const line of allLines) {
+    if (/galioj|garantij|expiry|exp\.?\s*date|kortel|card/i.test(line)) continue;
+    for (const match of [...line.matchAll(datePattern), ...line.matchAll(spacedTimestampPattern)]) {
       const value = normalizeDate(match);
       if (validPurchaseDate(value, today)) {
         dates.push(value);

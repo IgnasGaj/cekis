@@ -917,10 +917,12 @@ test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitim
   await page.getByLabel("Pardavėjas", { exact: true }).fill("Mano patikrintas pardavėjas");
   await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("Mano patikrinta prekė");
   await page.getByLabel("Kaina (neprivaloma)", { exact: true }).fill("18.75");
+  await page.getByLabel("Pirkimo data", { exact: true }).fill("2024-02-01");
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("Mano patikrintas pardavėjas");
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("Mano patikrinta prekė");
   await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("18.75");
+  await expect(page.getByLabel("Pirkimo data", { exact: true })).toHaveValue("2024-02-01");
   await page.getByRole("button", { name: "Bandyti nuskaityti dar kartą" }).click();
   await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
   await expect(page.getByText("Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu.")).toBeVisible();
@@ -929,4 +931,28 @@ test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitim
   await expect(page.getByText("PDF automatinis nuskaitymas neprieinamas. Įvesk duomenis rankiniu būdu.")).toBeVisible();
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("");
+});
+
+test("tikru OCR perskaitytos dvi datos pasiekia naujo pirkinio peržiūrą", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `footer-candidates-${randomUUID()}@example.test`);
+  await page.goto("/prideti");
+  const lines = [
+    ["UAB Pavyzdžio prekyba", 170], ["Bandymų įrenginys 39,99 A", 350],
+    ["Mokėti 39,99", 520], ["Kvito Nr. 5/6/12345", 710],
+    ["CR-000012345 2024-02-01 12:40:06", 1270],
+    ["Patikrinimas 2024-02-02 12:45:06", 1360],
+  ] as const;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1650"><rect width="100%" height="100%" fill="#eee"/><rect x="75" y="55" width="850" height="1540" fill="#f7f7f2"/><g font-family="DejaVu Sans" font-size="32" fill="#252525">${lines.map(([line, y]) => `<text x="110" y="${y}">${line}</text>`).join("")}</g></svg>`;
+  const photo = await sharp(Buffer.from(svg)).jpeg({ quality: 90 }).toBuffer();
+  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "fictional-footer.jpeg", mimeType: "image/jpeg", buffer: photo });
+  await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  const date = page.getByLabel("Pirkimo data", { exact: true });
+  await expect(date).toHaveValue("");
+  const field = page.locator(".field").filter({ has: date });
+  await expect(field.getByText("Galimi nuskaitymo variantai – patikrink čekį:")).toBeVisible();
+  await expect(field.getByRole("button", { name: "2024-02-01" })).toBeVisible();
+  await expect(field.getByRole("button", { name: "2024-02-02" })).toBeVisible();
+  await field.getByRole("button", { name: "2024-02-01" }).click();
+  await expect(date).toHaveValue("2024-02-01");
 });
