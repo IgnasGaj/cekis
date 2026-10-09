@@ -129,7 +129,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     <form id="review-fields" className="purchase-form receipt-review-form" onSubmit={save} noValidate>
       <h2>Patikrink informaciją</h2>
       {error && <div className="error-summary" role="alert">{error}</div>}
-      <fieldset disabled={saving}>
+      <fieldset disabled={!hydrated || saving}>
         {field("productName")}{field("seller")}{field("purchaseDate")}
         <div className="field receipt-total"><span className="review-label">Čekio suma</span><p>{suggestionTotal?.value ? `${suggestionTotal.value}${suggestions?.receiptCurrency.value ? ` ${suggestions.receiptCurrency.value}` : " · valiuta neaiški"}` : "Nėra patikimo pasiūlymo"}</p><small>Viso čekio suma nėra prekės kaina.</small></div>
         {field("price")}

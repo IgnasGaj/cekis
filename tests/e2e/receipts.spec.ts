@@ -725,6 +725,7 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
     const alerts = await page.locator(".error-summary").allTextContents().catch(() => []);
     throw new Error(`PDF review save returned ${pdfSave.status()}: ${body}; form alert: ${alerts.join(" | ")}`);
   }
+  expect(JSON.parse(pdfSave.request().postData() ?? "{}").productName).toBe("Rankiniu būdu patvirtinta prekė");
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
   await expect.poll(async () => db(async (client) => (await client.query("SELECT product_name FROM purchase WHERE id=$1", [purchaseId])).rows[0]?.product_name),
     { timeout: 15000 }).toBe("Rankiniu būdu patvirtinta prekė");
