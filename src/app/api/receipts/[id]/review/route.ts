@@ -19,6 +19,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (keys.some((key) => typeof body[key] !== "string" || body[key].length > 2100)) return Response.json({ error: "Patikrink įvestus duomenis." }, { status: 400 });
   const receiptNumber = body.receiptNumber;
   if (typeof receiptNumber !== "string" || receiptNumber.length > 100 || /[\u0000-\u001f\u007f]/.test(receiptNumber)) return Response.json({ errors: { receiptNumber: "Čekio numeris per ilgas arba netinkamas." } }, { status: 400 });
+  const expectedReceiptNumber = body.expectedReceiptNumber;
+  if (expectedReceiptNumber !== undefined && (typeof expectedReceiptNumber !== "string" || expectedReceiptNumber.length > 100))
+    return Response.json({ error: "Atnaujink puslapį ir bandyk dar kartą." }, { status: 400 });
   const parsed = parsePurchaseFields(Object.fromEntries(keys.map((key) => [key, body[key]])) as PurchaseFields);
   if (!parsed.value) return Response.json({ errors: parsed.errors }, { status: 400 });
   const warrantyFields = ["warrantyState", "warrantyEndDate", "warrantyDurationMonths", "warrantySource"] as const;
@@ -43,9 +46,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       warrantyDurationMonths: current.warranty_duration_months, warrantySource: current.warranty_source,
     }) : null;
     if (warranty && !warranty.value) { await client.query("ROLLBACK"); return Response.json({ errors: { warranty: warranty.error } }, { status: 400 }); }
+    const wantedNumber = receiptNumber.trim() || null;
+    const currentNumber = linked.rows[0].receipt_number as string | null;
+    // Older clients may replay an unchanged number, but cannot change shared metadata without a snapshot.
+    if (currentNumber !== wantedNumber && (expectedReceiptNumber === undefined || (expectedReceiptNumber.trim() || null) !== currentNumber)) {
+      await client.query("ROLLBACK");
+      return Response.json({ error: "Čekio numeris pasikeitė kitur. Atnaujink puslapį ir peržiūrėk pakeitimus; įvesti pirkinio duomenys liks formoje." }, { status: 409 });
+    }
     if (expectedRevision !== current.revision) {
       const unchanged = current.product_name === value.productName && current.seller === value.seller && dateText(current.purchase_date) === value.purchaseDate &&
-        current.price === value.price && current.currency === value.currency && current.notes === value.notes && linked.rows[0].receipt_number === (receiptNumber.trim() || null) &&
+        current.price === value.price && current.currency === value.currency && current.notes === value.notes && currentNumber === wantedNumber &&
         (!warranty?.value || (current.warranty_state === warranty.value.warrantyState && dateText(current.warranty_end_date) === warranty.value.warrantyEndDate && current.warranty_duration_months === warranty.value.warrantyDurationMonths && current.warranty_source === warranty.value.warrantySource));
       if (!unchanged) { await client.query("ROLLBACK"); return Response.json({ error: "Pirkinys pasikeitė kitur. Atnaujink puslapį ir peržiūrėk pakeitimus." }, { status: 409 }); }
       await client.query("COMMIT");
@@ -59,7 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       warranty_duration_months=case when $9::text is null then warranty_duration_months else $11::integer end,
       warranty_source=case when $9::text is null then warranty_source else $12::text end,revision=revision+1,updated_at=now()
       WHERE id=$7 AND owner_id=$8`, [value.productName,value.seller,value.purchaseDate,value.price,value.currency,value.notes,body.purchaseId,session.user.id,warranty?.value?.warrantyState ?? null,warranty?.value?.warrantyEndDate ?? null,warranty?.value?.warrantyDurationMonths ?? null,warranty?.value?.warrantySource ?? null]);
-    await client.query("UPDATE receipt SET receipt_number=$1,updated_at=now() WHERE id=$2 AND owner_id=$3", [receiptNumber.trim() || null,id,session.user.id]);
+    if (currentNumber !== wantedNumber) await client.query("UPDATE receipt SET receipt_number=$1,updated_at=now() WHERE id=$2 AND owner_id=$3", [wantedNumber,id,session.user.id]);
     await reconcilePurchase(client,session.user.id,body.purchaseId);
     await client.query("COMMIT");
     revalidatePath("/pradzia");

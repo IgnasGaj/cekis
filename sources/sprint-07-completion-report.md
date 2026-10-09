@@ -36,3 +36,7 @@ The first implementation [CI run](https://github.com/IgnasGaj/cekis/actions/runs
 ## Delivery
 
 Implementation commit: `e910b7724fe61bacf6c067804aedccc84839abab` (`Add useful home screen`), pushed to `feature/sprint-07-home-screen`. Its exact-head CI failure and correction are described above. The follow-up commit contains the affected authentication assertion correction and this report; its exact final pushed SHA and CI status are given in the handoff because a commit cannot contain its own hash.
+
+## Later verification record (2026-10-09)
+
+Sprint 7 is included in main commit `d88330e04b71f03c5df2c3957440ea3a42a1d7bf`, whose [CI run 37824588095](https://github.com/IgnasGaj/cekis/actions/runs/37824588095) passed on Node 22.23.3. The run recorded 60 unit tests, 22 reminder integration tests, and 51 browser tests passing first attempt with one OCR review case passing on retry. That OCR case is addressed in the [pre-Sprint 9 correction report](pre-sprint-09-correction-report.md); this later record does not change the historical Sprint 7 scope.

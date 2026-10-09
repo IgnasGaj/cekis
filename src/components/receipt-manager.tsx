@@ -2,29 +2,60 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ExistingPurchaseUploader } from "./receipt-upload";
+import type { ReceiptItem, ReceiptPage } from "@/lib/receipt-pages";
 
-type Item = { id: string; filename: string; contentType: string; byteSize: number; links: number };
+type Item = ReceiptItem;
 async function mutate(url: string, method: string, purchaseId?: string) {
   const result = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: purchaseId ? JSON.stringify({ purchaseId }) : undefined });
   if (!result.ok) { const body = await result.json().catch(() => ({})); throw new Error(body.error ?? "Veiksmo atlikti nepavyko."); }
 }
-export function ReceiptManager({ purchaseId, attached, available }: { purchaseId: string; attached: Item[]; available: Item[] }) {
+export function ReceiptManager({ purchaseId, attachedPage, availablePage }: { purchaseId: string; attachedPage: ReceiptPage; availablePage: ReceiptPage }) {
   const router = useRouter(); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Item | null>(null); const [selected, setSelected] = useState("");
-  const [search, setSearch] = useState(""); const [results, setResults] = useState<Item[] | null>(null);
-  const options = results ?? available;
+  const [search, setSearch] = useState("");
+  const attachedSignature = `${attachedPage.receipts.map((item) => item.id).join(":")}:${attachedPage.nextCursor ?? ""}`;
+  const availableSignature = `${availablePage.receipts.map((item) => item.id).join(":")}:${availablePage.nextCursor ?? ""}`;
+  const [attachedMore, setAttachedMore] = useState<{ signature: string; items: Item[]; cursor: string | null }>({ signature: attachedSignature, items: [], cursor: attachedPage.nextCursor });
+  const [availableMore, setAvailableMore] = useState<{ signature: string; query: string; items: Item[] | null; cursor: string | null }>({ signature: availableSignature, query: "", items: null, cursor: availablePage.nextCursor });
+  const extraAttached = attachedMore.signature === attachedSignature ? attachedMore.items : [];
+  const attachedCursor = attachedMore.signature === attachedSignature ? attachedMore.cursor : attachedPage.nextCursor;
+  const results = availableMore.signature === availableSignature ? availableMore.items : null;
+  const availableCursor = availableMore.signature === availableSignature ? availableMore.cursor : availablePage.nextCursor;
+  const query = availableMore.signature === availableSignature ? availableMore.query : "";
+  const attached = [...attachedPage.receipts, ...extraAttached];
+  const options = results ?? availablePage.receipts;
+  const pageUrl = (mode: "available" | "attached", cursor?: string | null, q = "") => {
+    const params = new URLSearchParams({ purchaseId, mode, q });
+    if (cursor) params.set("cursor", cursor);
+    return `/api/receipts/list?${params}`;
+  };
+  const getPage = async (mode: "available" | "attached", cursor?: string | null, q = ""): Promise<ReceiptPage> => {
+    const response = await fetch(pageUrl(mode,cursor,q), { cache: "no-store" });
+    if (!response.ok) throw new Error("Čekių sąrašo įkelti nepavyko.");
+    return response.json();
+  };
   const find = async () => {
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(`/api/receipts/list?purchaseId=${purchaseId}&q=${encodeURIComponent(search)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Čekių paieška nepavyko.");
-      setResults((await response.json()).receipts); setSelected("");
+      const page = await getPage("available",null,search);
+      setAvailableMore({ signature: availableSignature, query: search, items: page.receipts, cursor: page.nextCursor }); setSelected("");
     } catch { setMessage("Čekių paieška nepavyko. Bandyk dar kartą."); }
+    finally { setBusy(false); }
+  };
+  const loadMore = async (mode: "available" | "attached") => {
+    const cursor = mode === "attached" ? attachedCursor : availableCursor;
+    if (!cursor) return;
+    setBusy(true); setMessage("");
+    try {
+      const page = await getPage(mode,cursor,mode === "available" ? query : "");
+      if (mode === "attached") setAttachedMore({ signature: attachedSignature, items: [...extraAttached,...page.receipts], cursor: page.nextCursor });
+      else setAvailableMore({ signature: availableSignature, query, items: [...(results ?? availablePage.receipts),...page.receipts], cursor: page.nextCursor });
+    } catch { setMessage("Kitų čekių įkelti nepavyko. Bandyk dar kartą."); }
     finally { setBusy(false); }
   };
   const run = async (url: string, method: string, body?: string) => {
     setBusy(true); setMessage("");
-    try { await mutate(url, method, body); setMessage("Pakeitimai išsaugoti"); setConfirm(null); setResults(null); setSelected(""); router.refresh(); }
+    try { await mutate(url, method, body); setMessage("Pakeitimai išsaugoti"); setConfirm(null); setSelected(""); setAttachedMore({ signature: attachedSignature, items: [], cursor: attachedPage.nextCursor }); setAvailableMore({ signature: availableSignature, query: "", items: null, cursor: availablePage.nextCursor }); router.refresh(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Veiksmo atlikti nepavyko."); }
     finally { setBusy(false); }
   };
@@ -35,9 +66,11 @@ export function ReceiptManager({ purchaseId, attached, available }: { purchaseId
       <button disabled={busy} type="button" onClick={() => run(`/api/receipts/${item.id}/links`, "DELETE", purchaseId)}>Pašalinti iš šio pirkinio</button>
       <button disabled={busy} type="button" onClick={() => setConfirm(item)}>Ištrinti čekį visur</button></article>)}
     {confirm && <div className="delete-confirm" role="group" aria-label="Patvirtinti čekio ištrynimą"><strong>Ištrinti „{confirm.filename}“?</strong><p>Čekis bus pašalintas iš {confirm.links} pirkinių ir taps nepasiekiamas.</p><button className="danger-button" disabled={busy} type="button" onClick={() => run(`/api/receipts/${confirm.id}`, "DELETE")}>Ištrinti čekį visur</button><button className="secondary-button" type="button" onClick={() => setConfirm(null)}>Atšaukti</button></div>}
+    {attachedCursor && <button className="secondary-button" type="button" disabled={busy} onClick={() => loadMore("attached")}>Rodyti daugiau pridėtų čekių</button>}
     <ExistingPurchaseUploader purchaseId={purchaseId} />
     <div className="existing-receipt"><label htmlFor="receipt-search">Ieškoti turimo čekio pagal failo pavadinimą</label><input id="receipt-search" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /><button className="secondary-button" type="button" disabled={busy} onClick={find}>Ieškoti čekių</button>
-      <label htmlFor="existing-receipt">Pridėti turimą čekį</label><select id="existing-receipt" value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Pasirink čekį</option>{options.map((item) => <option key={item.id} value={item.id}>{item.filename}</option>)}</select><button className="secondary-button" type="button" disabled={!selected || busy} onClick={() => run(`/api/receipts/${selected}/links`, "POST", purchaseId)}>Pridėti turimą čekį</button></div>
+      <label htmlFor="existing-receipt">Pridėti turimą čekį</label><select id="existing-receipt" value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Pasirink čekį</option>{options.map((item) => <option key={item.id} value={item.id}>{item.filename} · {item.uploadedLabel} · {item.id.slice(0,8)}</option>)}</select><button className="secondary-button" type="button" disabled={!selected || busy} onClick={() => run(`/api/receipts/${selected}/links`, "POST", purchaseId)}>Pridėti turimą čekį</button>
+      {availableCursor && <button className="secondary-button" type="button" disabled={busy} onClick={() => loadMore("available")}>Rodyti daugiau turimų čekių</button>}</div>
     {message && <p role="status" aria-live="polite" className="notice">{message}</p>}
   </section>;
 }

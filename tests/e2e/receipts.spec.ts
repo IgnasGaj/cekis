@@ -562,6 +562,82 @@ test("objektas išlieka, kai galutinis DB įrašas nepavyksta, ir pakartojimas j
   }
 });
 
+test("bendro čekio numerio pasenusi peržiūra ir netinkami JSON kūnai", async ({ browser }) => {
+  const context = await browser.newContext();
+  const firstPage = await context.newPage();
+  const secondPage = await context.newPage();
+  await signIn(firstPage, `shared-review-${randomUUID()}@example.test`);
+  const first = await createPurchase(firstPage, "Pirmas bendras pirkinys");
+  const second = await createPurchase(firstPage, "Antras bendras pirkinys");
+  const receiptId = randomUUID();
+  await db(async (client) => {
+    const owner = (await client.query("SELECT owner_id FROM purchase WHERE id=$1", [first])).rows[0].owner_id;
+    await client.query(`INSERT INTO receipt (id,owner_id,submission_key,target_purchase_id,object_key,filename,receipt_number,content_type,byte_size,sha256,state,expires_at)
+      VALUES ($1,$2,$3,$4,$5,'bendras.png','ORIGINAL','image/png',8,$6,'ready',now()+interval '1 day')`,
+      [receiptId,owner,randomUUID(),first,`synthetic/${receiptId}`,"a".repeat(64)]);
+    await client.query("INSERT INTO purchase_receipt (owner_id,purchase_id,receipt_id) VALUES ($1,$2,$3),($1,$4,$3)", [owner,first,receiptId,second]);
+  });
+  await firstPage.goto(`/pirkiniai/${first}/cekis/${receiptId}`);
+  await secondPage.goto(`/pirkiniai/${second}/cekis/${receiptId}`);
+  await expect(secondPage.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("ORIGINAL");
+  const firstRevision = await db(async (client) => (await client.query("SELECT revision FROM purchase WHERE id=$1",[first])).rows[0].revision as number);
+  const correction = { purchaseId: first, productName: "Pirmas bendras pirkinys", seller: "Bandymų pardavėjas", purchaseDate: "2024-01-01", price: "", currency: "", notes: "", receiptNumber: "CORRECTED", expectedReceiptNumber: "ORIGINAL", expectedRevision: firstRevision };
+  const save = () => firstPage.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: correction });
+  expect((await save()).status()).toBe(200);
+  expect((await save()).status()).toBe(200);
+  await secondPage.getByLabel("Prekės pavadinimas").fill("Antras pakeistas pirkinys");
+  await secondPage.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(secondPage.locator(".error-summary")).toContainText("Čekio numeris pasikeitė kitur");
+  await expect(secondPage.getByLabel("Prekės pavadinimas")).toHaveValue("Antras pakeistas pirkinys");
+  await db(async (client) => {
+    expect((await client.query("SELECT receipt_number FROM receipt WHERE id=$1",[receiptId])).rows[0].receipt_number).toBe("CORRECTED");
+    expect((await client.query("SELECT product_name FROM purchase WHERE id=$1",[second])).rows[0].product_name).toBe("Antras bendras pirkinys");
+  });
+  for (const body of ["null", "[]", '"hello"', "{", "{}", '{"purchaseId":42}']) {
+    const response = await firstPage.request.post(`/api/receipts/${receiptId}/links`, { headers: { Origin: process.env.APP_URL!, "Content-Type": "application/json" }, data: body });
+    expect(response.status(), body).toBeGreaterThanOrEqual(400); expect(response.status(), body).toBeLessThan(500);
+  }
+  for (const body of ["null", "[]", '"hello"', "{", "{}", '{"key":42}']) {
+    const response = await firstPage.request.post("/api/receipts/cancel", { headers: { Origin: process.env.APP_URL!, "Content-Type": "application/json" }, data: body });
+    expect(response.status(), body).toBe(400);
+  }
+  await context.close();
+});
+
+test("visi 51 vienodo vardo ir 101 pridėtas čekis pasiekiami puslapiais", async ({ page }) => {
+  test.setTimeout(120000);
+  await signIn(page, `receipt-pages-${randomUUID()}@example.test`);
+  const target = await createPurchase(page, "Tikslinis pirkinys");
+  const source = await createPurchase(page, "Šaltinio pirkinys");
+  const oldest = await db(async (client) => {
+    const owner = (await client.query("SELECT owner_id FROM purchase WHERE id=$1",[target])).rows[0].owner_id;
+    const available = await client.query(`INSERT INTO receipt (owner_id,submission_key,target_purchase_id,object_key,filename,content_type,byte_size,sha256,state,expires_at,created_at)
+      SELECT $1,gen_random_uuid(),$2,'synthetic/' || gen_random_uuid(),'cekis.jpg','image/jpeg',8,$3,'ready',now()+interval '1 day',now()-n*interval '1 second'
+      FROM generate_series(1,51) AS n RETURNING id,created_at`,[owner,source,"a".repeat(64)]);
+    await client.query(`WITH inserted AS (INSERT INTO receipt (owner_id,submission_key,target_purchase_id,object_key,filename,content_type,byte_size,sha256,state,expires_at)
+      SELECT $1,gen_random_uuid(),$2,'synthetic/' || gen_random_uuid(),'pridetas.jpg','image/jpeg',8,$3,'ready',now()+interval '1 day'
+      FROM generate_series(1,101) RETURNING id)
+      INSERT INTO purchase_receipt (owner_id,purchase_id,receipt_id) SELECT $1,$2,id FROM inserted`,[owner,target,"a".repeat(64)]);
+    return available.rows.sort((a,b) => a.created_at.getTime()-b.created_at.getTime())[0].id as string;
+  });
+  await page.goto(`/pirkiniai/${target}`);
+  await expect(page.locator(".receipt-item")).toHaveCount(50);
+  await page.getByRole("button", { name: "Rodyti daugiau pridėtų čekių" }).click();
+  await expect(page.locator(".receipt-item")).toHaveCount(100);
+  await page.getByRole("button", { name: "Rodyti daugiau pridėtų čekių" }).click();
+  await expect(page.locator(".receipt-item")).toHaveCount(101);
+  await page.getByLabel("Ieškoti turimo čekio pagal failo pavadinimą").fill("cekis.jpg");
+  await page.getByRole("button", { name: "Ieškoti čekių" }).click();
+  await expect(page.locator("#existing-receipt option")).toHaveCount(51);
+  await page.getByRole("button", { name: "Rodyti daugiau turimų čekių" }).click();
+  await expect(page.locator("#existing-receipt option")).toHaveCount(52);
+  await expect(page.locator(`#existing-receipt option[value="${oldest}"]`)).toHaveCount(1);
+  await page.getByLabel("Pridėti turimą čekį").selectOption(oldest);
+  await page.getByRole("button", { name: "Pridėti turimą čekį" }).click();
+  await expect.poll(() => db(async (client) => (await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE purchase_id=$1",[target])).rows[0].n as number)).toBe(102);
+  expect((await page.request.get(`/api/receipts/list?purchaseId=${target}&cursor=bad!`)).status()).toBe(400);
+});
+
 test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis", async ({ browser }) => {
   test.setTimeout(240000);
   const suffix = randomUUID();
@@ -640,7 +716,16 @@ test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis",
   await pdfItem.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
   await expect(page.getByText("Šio PDF automatinis nuskaitymas neprieinamas.", { exact: false })).toBeVisible();
   await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
-  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  const [pdfSave] = await Promise.all([
+    page.waitForResponse((response) => /\/api\/receipts\/[0-9a-f-]+\/review$/.test(response.url()) && response.request().method() === "POST", { timeout: 15000 }),
+    page.getByRole("button", { name: "Išsaugoti", exact: true }).click(),
+  ]);
+  if (pdfSave.status() !== 200) {
+    const body = await pdfSave.text().catch(() => "Response body unavailable");
+    const alerts = await page.locator(".error-summary").allTextContents().catch(() => []);
+    throw new Error(`PDF review save returned ${pdfSave.status()}: ${body}; form alert: ${alerts.join(" | ")}`);
+  }
+  expect(JSON.parse(pdfSave.request().postData() ?? "{}").productName).toBe("Rankiniu būdu patvirtinta prekė");
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
   await expect.poll(async () => db(async (client) => (await client.query("SELECT product_name FROM purchase WHERE id=$1", [purchaseId])).rows[0]?.product_name),
     { timeout: 15000 }).toBe("Rankiniu būdu patvirtinta prekė");

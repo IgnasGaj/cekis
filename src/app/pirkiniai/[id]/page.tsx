@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { PurchaseShell } from "@/components/purchase-shell";
 import { displayDate, displayPrice } from "@/lib/purchase-format";
 import { getPurchase, listHref, listParams } from "@/lib/purchases";
-import { pool } from "@/lib/db";
+import { listReceiptPage } from "@/lib/receipt-pages";
 import { ReceiptManager } from "@/components/receipt-manager";
 import { DeleteButton } from "../delete-button";
 import { todayInVilnius } from "@/lib/purchase-validation";
@@ -16,15 +16,9 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
   const { id } = await params;
   const row = await getPurchase(id);
   if (!row) notFound();
-  const attachedResult = await pool.query(`SELECT r.id,r.filename,r.content_type AS "contentType",r.byte_size AS "byteSize",
-    (SELECT count(*)::int FROM purchase_receipt x WHERE x.receipt_id=r.id) AS links
-    FROM receipt r JOIN purchase_receipt pr ON pr.receipt_id=r.id AND pr.owner_id=r.owner_id
-    WHERE pr.purchase_id=$1 AND r.owner_id=$2 AND r.state='ready' ORDER BY pr.created_at DESC LIMIT 100`, [id,row.ownerId]);
-  const availableResult = await pool.query(`SELECT r.id,r.filename,r.content_type AS "contentType",r.byte_size AS "byteSize",
-    (SELECT count(*)::int FROM purchase_receipt x WHERE x.receipt_id=r.id) AS links
-    FROM receipt r WHERE r.owner_id=$1 AND r.state='ready' AND NOT EXISTS
-    (SELECT 1 FROM purchase_receipt pr WHERE pr.receipt_id=r.id AND pr.purchase_id=$2)
-    ORDER BY r.created_at DESC LIMIT 50`, [row.ownerId,id]);
+  const [attachedPage,availablePage] = await Promise.all([
+    listReceiptPage(row.ownerId,id,"attached"),listReceiptPage(row.ownerId,id,"available"),
+  ]);
   const search = await searchParams;
   const single = (key: string) => typeof search[key] === "string" ? search[key] as string : undefined;
   const context = listParams({ q: single("q"), sort: single("sort"), warranty: single("warranty"), page: single("page") });
@@ -53,7 +47,7 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
       {status.days !== null && status.days >= 0 && <p>{dayPhrase(status.days)}</p>}
       <Link className="text-link" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Keisti garantijos informaciją</Link>
     </section>
-    <ReceiptManager purchaseId={id} attached={attachedResult.rows} available={availableResult.rows} />
+    <ReceiptManager purchaseId={id} attachedPage={attachedPage} availablePage={availablePage} />
     <Link className="primary-button" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Redaguoti</Link>
     <DeleteButton id={id} productName={row.productName} context={contextQuery.toString()} />
   </PurchaseShell>;
