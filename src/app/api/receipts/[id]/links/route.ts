@@ -7,7 +7,8 @@ async function mutate(request: Request, id: string, link: boolean) {
   if (request.headers.get("origin") !== getEnv().APP_URL) return json("Neleistina užklausa.", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return json("Prisijunk ir bandyk dar kartą.", 401);
-  const purchaseId = (await request.json().catch(() => ({}))).purchaseId;
+  const body = await request.json().catch(() => null);
+  const purchaseId = body !== null && typeof body === "object" && !Array.isArray(body) ? body.purchaseId : undefined;
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuid.test(id)) return json("Čekis nerastas.", 404);
   if (typeof purchaseId !== "string" || !uuid.test(purchaseId)) return json("Pirkinys nerastas.", 404);

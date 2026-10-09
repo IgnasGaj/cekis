@@ -1,7 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- Private authenticated receipt content is served without a public image URL. */
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { scanReceipt } from "@/lib/scan-receipt";
 import { hasModelCode, suggestionValues, type ReceiptSuggestions, type Suggestion } from "@/lib/ocr-parser";
 import type { PurchaseFields, PurchaseErrors } from "@/lib/purchase-validation";
@@ -23,7 +22,7 @@ function stopOcrWorker(worker: Worker | null) {
 export function ReceiptReview({ purchaseId, receiptId, filename, contentType, receiptNumber, initial, maxDate, initialWarranty, revision }: {
   purchaseId: string; receiptId: string; filename: string; contentType: string; receiptNumber: string; initial: PurchaseFields; maxDate: string; initialWarranty: WarrantyInput; revision: number;
 }) {
-  const router = useRouter();
+  const [hydrated, setHydrated] = useState(false);
   const [values, setValues] = useState(initial);
   const [warranty, setWarranty] = useState(() => draftFromWarranty(initialWarranty));
   const [number, setNumber] = useState(receiptNumber);
@@ -37,7 +36,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
   const sequence = useRef(0);
   const savingRef = useRef(false);
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; active.current?.controller.abort(); stopOcrWorker(active.current?.worker ?? null); active.current = null; }; }, []);
+  useEffect(() => { mounted.current = true; const frame = requestAnimationFrame(() => setHydrated(true)); return () => { cancelAnimationFrame(frame); mounted.current = false; active.current?.controller.abort(); stopOcrWorker(active.current?.worker ?? null); active.current = null; }; }, []);
   useEffect(() => {
     const key = `receipt-scan:${receiptId}`;
     try {
@@ -102,10 +101,12 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
     event.preventDefault(); if (savingRef.current) return;
     savingRef.current = true; setSaving(true); setError(""); setErrors({});
     try {
-      const response = await fetch(`/api/receipts/${receiptId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseId, ...values, ...warranty, expectedRevision: revision, receiptNumber: number }) });
+      const response = await fetch(`/api/receipts/${receiptId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchaseId, ...values, ...warranty, expectedRevision: revision, expectedReceiptNumber: receiptNumber, receiptNumber: number }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) { setErrors(body.errors ?? {}); throw new Error(body.error ?? "Patikrink pažymėtus laukus ir bandyk dar kartą."); }
-      router.push(`/pirkiniai/${purchaseId}?busena=atnaujinta`); router.refresh();
+      // A committed review leaves this form with a fresh server-rendered purchase detail.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign(`/pirkiniai/${purchaseId}?busena=atnaujinta`);
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "Išsaugoti nepavyko. Bandyk dar kartą."); }
     finally { savingRef.current = false; if (mounted.current) setSaving(false); }
   };
@@ -138,7 +139,7 @@ export function ReceiptReview({ purchaseId, receiptId, filename, contentType, re
         <div className="field"><label htmlFor="review-number">Čekio numeris (neprivaloma)</label><input id="review-number" value={number} maxLength={100} onChange={(event) => { setNumber(event.target.value); setErrors((prior) => ({ ...prior, receiptNumber: undefined })); }} aria-invalid={Boolean(errors.receiptNumber)} />{hint("receiptNumber")}{errors.receiptNumber && <p className="form-error">{errors.receiptNumber}</p>}</div>
         <div className="field"><label htmlFor="review-notes">Pastabos (neprivaloma)</label><textarea id="review-notes" value={values.notes} maxLength={2000} rows={4} onChange={(event) => setField("notes", event.target.value)} />{errors.notes && <p className="form-error">{errors.notes}</p>}</div>
         <WarrantyEditor value={warranty} onChange={setWarranty} purchaseDate={values.purchaseDate} initialPurchaseDate={initial.purchaseDate} initialKnown={initialWarranty.warrantyState === "known"} error={errors.warranty} fields={false} />
-        <button className="primary-button" type="submit">{saving ? "Išsaugoma…" : "Išsaugoti"}</button>
+        <button className="primary-button" type="submit" disabled={!hydrated || saving}>{saving ? "Išsaugoma…" : "Išsaugoti"}</button>
       </fieldset>
     </form>
   </>;

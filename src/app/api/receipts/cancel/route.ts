@@ -5,7 +5,8 @@ export async function POST(request: Request) {
   if (request.headers.get("origin") !== getEnv().APP_URL) return Response.json({ error: "Neleistina užklausa." }, { status: 403 });
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return Response.json({ error: "Prisijunk ir bandyk dar kartą." }, { status: 401 });
-  const { key } = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => null);
+  const key = body !== null && typeof body === "object" && !Array.isArray(body) ? body.key : undefined;
   if (typeof key !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) return Response.json({ error: "Netinkamas raktas." }, { status: 400 });
   const db = await pool.connect();
   try {

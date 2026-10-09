@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { config as loadEnv } from "dotenv";
 
 if (!process.env.CI) loadEnv({ path: ".env.test.local", override: true });
+if (process.env.CEKIS_E2E_APP_URL) process.env.APP_URL = process.env.CEKIS_E2E_APP_URL;
 // Disposable services and a fixed local send-window clock for reminder integration cases.
 const dateParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius",year:"numeric",month:"2-digit",day:"2-digit" }).formatToParts(new Date()).map((part) => [part.type,part.value]));
 const vilniusDay = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
