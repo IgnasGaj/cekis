@@ -4,7 +4,7 @@ Checked 2026-10-12. The beta is live on **Render Free** at [https://cekis-beta.o
 
 ## Configuration and cost
 
-The Render blueprint defines one Frankfurt Node web service on the Free plan. The service uses the owner's direct Neon PostgreSQL connection through a limited `cekis_app` role, a private Neon Object Storage bucket for originals, and Brevo SMTP on port 2525 with STARTTLS. Render has the 17 runtime settings required by the app and does **not** have the migration-owner URL. The ignored `.env.local` holds local credentials; Git ignores it, and no credential is in this report or the committed changes. The verified sender is `ignas.gajauskas@icloud.com`.
+The Render blueprint defines one Frankfurt Node web service on the Free plan. The service uses the owner's direct Neon PostgreSQL connection through a limited `cekis_app` role, a private Neon Object Storage bucket for originals, and Brevo SMTP on port 2525 with STARTTLS. Render has the 17 runtime settings required by the app and does **not** have the migration-owner URL. The ignored `.env.local` holds local credentials; Git ignores it, and no credential is in this report or the committed changes. The verified sender is configured only in the environment.
 
 `REMINDER_TRANSPORT_ENABLED` is enabled in the live Render environment. The blueprint entry was changed from a hardcoded `false` to `sync: false` so a future blueprint sync preserves the dashboard value. Render's [Blueprint specification](https://render.com/docs/blueprint-spec) documents this behavior. No paid plan, trial, payment method, or Sprint 9 work was activated.
 
