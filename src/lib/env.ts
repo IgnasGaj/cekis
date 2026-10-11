@@ -19,9 +19,10 @@ const schema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32).refine((value) => !value.startsWith("replace-with-")),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535),
-  SMTP_FROM: z.string().min(3),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().min(3).refine((value) => !value.startsWith("PASTE_")),
+  SMTP_USER: z.string().optional().refine((value) => !value?.startsWith("PASTE_")),
+  SMTP_PASSWORD: z.string().optional().refine((value) => !value?.startsWith("PASTE_")),
+  SMTP_REQUIRE_TLS: z.enum(["true", "false"]).default("false"),
   REMINDER_TRANSPORT_ENABLED: z.enum(["true", "false"]).default("false"),
   REMINDER_WORKER_SECRET: z.string().min(32).optional(),
   AUTH_SEND_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
@@ -31,6 +32,10 @@ const schema = z.object({
   S3_BUCKET: z.string().min(3).optional(),
   S3_ACCESS_KEY_ID: z.string().min(1).optional(),
   S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  AWS_ENDPOINT_URL_S3: z.url().optional(),
+  AWS_REGION: z.string().min(1).optional(),
+  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   RECEIPT_UPLOADS_PER_HOUR: z.coerce.number().int().min(1).max(100).default(20),
   RECEIPT_ATTEMPTS_PER_HOUR: z.coerce.number().int().min(1).max(500).default(60),
 });
@@ -49,12 +54,17 @@ export function getEnv() {
 
 export function getStorageEnv() {
   const env = getEnv();
-  if (!env.S3_ENDPOINT || !env.S3_REGION || !env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
+  const useAws = Boolean(env.AWS_ENDPOINT_URL_S3 || env.AWS_REGION || env.AWS_ACCESS_KEY_ID || env.AWS_SECRET_ACCESS_KEY);
+  const endpoint = useAws ? env.AWS_ENDPOINT_URL_S3 : env.S3_ENDPOINT;
+  const region = useAws ? env.AWS_REGION : env.S3_REGION;
+  const accessKeyId = useAws ? env.AWS_ACCESS_KEY_ID : env.S3_ACCESS_KEY_ID;
+  const secretAccessKey = useAws ? env.AWS_SECRET_ACCESS_KEY : env.S3_SECRET_ACCESS_KEY;
+  if (!endpoint || !region || !env.S3_BUCKET || !accessKeyId || !secretAccessKey) {
     throw new Error("Čekio saugykla nesukonfigūruota.");
   }
-  const url = new URL(env.S3_ENDPOINT);
+  const url = new URL(endpoint);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname))) {
     throw new Error("Čekio saugyklai reikia HTTPS arba vietinio adreso.");
   }
-  return { endpoint: env.S3_ENDPOINT, region: env.S3_REGION, bucket: env.S3_BUCKET, accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY };
+  return { endpoint, region, bucket: env.S3_BUCKET, accessKeyId, secretAccessKey };
 }

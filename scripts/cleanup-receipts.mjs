@@ -4,10 +4,15 @@ import pg from "pg";
 config({ path: process.env.CEKIS_ENV_FILE ?? ".env.local" });
 const dryRun = process.argv.includes("--dry-run");
 const limit = Math.min(100, Math.max(1, Number(process.env.RECEIPT_CLEANUP_BATCH ?? 25)));
-const { DATABASE_URL, S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY } = process.env;
-if (!DATABASE_URL || (!dryRun && (!S3_ENDPOINT || !S3_REGION || !S3_BUCKET || !S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY))) throw new Error("Trūksta saugyklos arba duomenų bazės konfigūracijos.");
+const { DATABASE_URL, S3_BUCKET } = process.env;
+const useAws = Boolean(process.env.AWS_ENDPOINT_URL_S3 || process.env.AWS_REGION || process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SECRET_ACCESS_KEY);
+const endpoint = useAws ? process.env.AWS_ENDPOINT_URL_S3 : process.env.S3_ENDPOINT;
+const region = useAws ? process.env.AWS_REGION : process.env.S3_REGION;
+const accessKeyId = useAws ? process.env.AWS_ACCESS_KEY_ID : process.env.S3_ACCESS_KEY_ID;
+const secretAccessKey = useAws ? process.env.AWS_SECRET_ACCESS_KEY : process.env.S3_SECRET_ACCESS_KEY;
+if (!DATABASE_URL || (!dryRun && (!endpoint || !region || !S3_BUCKET || !accessKeyId || !secretAccessKey))) throw new Error("Trūksta saugyklos arba duomenų bazės konfigūracijos.");
 const db = new pg.Client({ connectionString: DATABASE_URL }); await db.connect();
-const s3 = dryRun ? null : new S3Client({ endpoint: S3_ENDPOINT, region: S3_REGION, forcePathStyle: true, credentials: { accessKeyId: S3_ACCESS_KEY_ID, secretAccessKey: S3_SECRET_ACCESS_KEY }, maxAttempts: 2 });
+const s3 = dryRun ? null : new S3Client({ endpoint, region, forcePathStyle: true, credentials: { accessKeyId, secretAccessKey }, maxAttempts: 2 });
 let examined = 0, deleted = 0, failed = 0;
 try {
   for (let i = 0; i < limit; i++) {
