@@ -30,6 +30,7 @@ export function PurchaseForm({ initial, action, cancelHref, submissionKey, edit 
   const field = (key: keyof PurchaseFields, type = "text") => <div className="field" key={key}>
     <label htmlFor={key}>{labels[key]}</label>
     <input id={key} name={key} type={type} value={values[key]} onChange={(event) => change(key, event.target.value)}
+      onInput={key === "purchaseDate" ? (event) => change(key, event.currentTarget.value) : undefined}
       maxLength={key === "productName" || key === "seller" ? 200 : key === "price" ? 20 : undefined}
       max={key === "purchaseDate" ? maxDate : undefined}
       inputMode={key === "price" ? "decimal" : undefined} aria-invalid={Boolean(errors[key])} aria-describedby={errors[key] ? `${key}-error` : undefined} />
