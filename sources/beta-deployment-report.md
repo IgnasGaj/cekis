@@ -6,7 +6,7 @@ Checked 2026-10-11. **Status: preparation only; no live URL. Do not invite teste
 
 - Repository: `https://github.com/IgnasGaj/cekis.git`; `main` and remote default branch both point to `09ff4f5c87630697037318577f32954729bb676c` at inspection. The worktree was clean. The pre-Sprint 9 correction commits `38f589f`, `bc40aa1`, and `fb8c29c` are ancestors of `main`; no other feature branch was merged.
 - Existing app: Next.js 16/Node 22, Better Auth email links, PostgreSQL/Drizzle, private S3-compatible originals, browser OCR, and a protected reminder worker. No architecture replacement.
-- Prepared in this task: a Render Free web blueprint, a hosted `PORT` start command, an opt-in hourly GitHub Actions maintenance workflow, hosted SMTP TLS enforcement/timeouts, and secret-free environment/deployment notes. No provider resource, migration, email sender, or scheduler has been activated. Deployed commit, live URL and CI result: **not yet available**.
+- Prepared in this task: a Render Free web blueprint, a hosted `PORT` start command, an opt-in hourly GitHub Actions maintenance workflow, hosted SMTP TLS enforcement/timeouts, and secret-free environment/deployment notes. PR [#3](https://github.com/IgnasGaj/cekis/pull/3) passed CI and was merged into `main` as `2e881b014cd4ec1dcecfd6a21e6cf293edbb18a2`. The final branch [CI run](https://github.com/IgnasGaj/cekis/actions/runs/38129649072) passed migrations, role checks, audit, lint, unit tests, reminder integration, browser tests, and production build; one browser test passed on retry after an initial timeout. No provider resource, migration, email sender, or scheduler has been activated. Deployed commit and live URL: **not yet available**.
 
 ## Free-service fit and cost boundaries
 
