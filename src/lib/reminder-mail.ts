@@ -21,7 +21,7 @@ export async function sendReminderMail(to: string, message: ReturnType<typeof re
   const env = getEnv();
   if (env.REMINDER_TRANSPORT_ENABLED !== "true") throw Object.assign(new Error("Transport unavailable"), { reminderClass: "configuration" });
   const transport = nodemailer.createTransport({ host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_PORT === 465,
-    requireTLS: env.SMTP_PORT !== 465 && new URL(env.APP_URL).protocol === "https:",
+    requireTLS: env.SMTP_PORT !== 465 && (env.SMTP_REQUIRE_TLS === "true" || new URL(env.APP_URL).protocol === "https:"),
     auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
     connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 20_000, dnsTimeout: 15_000 });
   const info = await transport.sendMail({ from: env.SMTP_FROM, to, ...message });
