@@ -9,6 +9,14 @@
 - An SMTP inbox/catcher for local development
 - A private S3-compatible bucket for receipt originals
 
+## Friends-and-family beta deployment
+
+The prepared [Render blueprint](render.yaml) targets a free Node web service in Frankfurt. It binds Next.js to Render's `PORT`, keeps all credentials in Render environment settings, and deploys `main` after its CI checks pass. It is **not a live deployment** until the separate beta services, migrations, sender and deployed flows in [the beta deployment report](sources/beta-deployment-report.md) are completed. Keep the selected `onrender.com` origin in `APP_URL`; do not use a preview URL or localhost.
+
+For a separate beta backend, create a Neon Free project in an EU region and a private S3-compatible bucket. Use a direct owner connection only in an ignored local environment file for `npm run db:migrate` and `npm run db:grant`, then verify `npm run db:check-role`; set Render `DATABASE_URL` to the limited application role. Do not run `db:push` or copy development data. Test the selected provider's `PutObject` conditional write, 10 MiB uploads, byte-for-byte download, and private object access before inviting testers. A free Render web service can sleep when idle, so the first request can be slow.
+
+Render Free blocks outbound SMTP ports 25, 465 and 587. The blueprint uses port 2525; configure a real sender that supports STARTTLS and verify delivery to two external mailboxes. The hosted app requires SMTP TLS. Keep `REMINDER_TRANSPORT_ENABLED=false` until sign-in mail is verified, then enable it for a controlled reminder test. The prepared [maintenance workflow](.github/workflows/beta-maintenance.yml) runs hourly only after the repository variable `BETA_MAINTENANCE_ENABLED` is set to `true`. Store its `BETA_*` credentials as GitHub Actions secrets, set `BETA_APP_URL` as a repository variable, then dispatch it manually and inspect results before enabling the schedule. Scheduled GitHub Actions can run late or be dropped; check its run history and manually dispatch after a missed run. Receipt cleanup uses the limited database role and private bucket key; the reminder endpoint uses its dedicated bearer secret.
+
 ## Quick start with Docker
 
 ```sh
@@ -35,7 +43,7 @@ For a non-Docker SMTP inbox, [install the free Mailpit binary](https://mailpit.a
 
 `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` are server-only. The local `local_s3` container binds to `127.0.0.1:9000`; local and test buckets are separate. Its single-server mode is for development and integration tests, not production durability. Without Docker, run the [local-s3 standalone binary](https://github.com/shyim/local-s3#run-locally) or another private S3-compatible service at the configured endpoint, then run `npm run storage:init`. Remote storage requires HTTPS. Missing storage configuration or an outage returns an error, never a simulated save. See the [storage decision](docs/decisions/sprint-03-private-storage.md) for production permissions and limits.
 
-`.env.example` lists required values. `APP_URL` must be the exact browser origin, including port. `BETTER_AUTH_SECRET` must have at least 32 characters. `DATABASE_URL` is for the limited application role; `MIGRATION_DATABASE_URL` is for the schema owner. Set `SMTP_USER` and `SMTP_PASSWORD` together only for a real SMTP provider. Production needs HTTPS, a domain, a real email transport and a reviewed deployment/database setup. Auth links expire after five minutes and are single use. Losing access to the mailbox means email-link recovery is unavailable.
+`.env.example` lists required values. `APP_URL` must be the exact browser origin, including port. `BETTER_AUTH_SECRET` must have at least 32 characters. `DATABASE_URL` is for the limited application role; `MIGRATION_DATABASE_URL` is for the schema owner. Set `SMTP_USER` and `SMTP_PASSWORD` together only for a real SMTP provider. Hosting needs a stable HTTPS origin, a real verified email sender and a reviewed deployment/database setup; the app URL can use the host's free subdomain. Auth links expire after five minutes and are single use. Losing access to the mailbox means email-link recovery is unavailable.
 
 Direct magic-link sign-in requests must include `callbackURL: "/pradzia"` and `errorCallbackURL: "/prisijungti/nuoroda-nebegalioja"`. Missing or unsupported destinations return HTTP 400 without sending mail or using the per-email quota. Better Auth checks request trust and its own rate limit before the atomic database quota check at the email-send boundary. An SMTP failure still uses one send attempt; otherwise repeated transport failures could evade the abuse limit. Request a new link after the transport is restored.
 
