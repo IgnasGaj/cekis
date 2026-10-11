@@ -30,7 +30,7 @@ services:
       - key: SMTP_PASSWORD
         sync: false
       - key: REMINDER_TRANSPORT_ENABLED
-        value: "false"
+        sync: false
       - key: REMINDER_WORKER_SECRET
         sync: false
       - key: AWS_ENDPOINT_URL_S3
