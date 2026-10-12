@@ -46,7 +46,7 @@ The purchase `b1fa2813-92a9-492e-837d-e660fe0e85ce` had the explicit beta-test l
 
 A second encrypted archive of the cleaned beta state is at `~/.local/share/cekis-beta/backups/2026-10-12T08-27-31-481Z/`. Its restore recovered 13 public tables with zero purchases, receipts, links, reminders, or objects. The pre-delete archive is retained for recovery; the owner should copy encrypted archives and the identity to separate protected storage, then apply a retention period for the pre-delete test snapshot.
 
-Account deletion is still an operator procedure: authenticate the request, export data if requested, remove database records and all linked or detached private objects, verify both stores, and keep a minimal completion record. HEIC is unsupported, PDF fields need manual review, and phone-camera behavior still needs device checks.
+Account deletion is still an untested operator procedure: authenticate the request, export data if requested, remove database records and all linked or detached private objects, verify both stores, and keep a minimal completion record. Only the specifically authorized synthetic purchase and originals were removed; neither user account was deleted. HEIC is unsupported, PDF fields need manual review, and phone-camera behavior still needs device checks.
 
 ## Tester handoff
 
