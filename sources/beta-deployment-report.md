@@ -8,7 +8,7 @@ The Render blueprint defines one Frankfurt Node web service on the Free plan. Th
 
 `REMINDER_TRANSPORT_ENABLED` is enabled in the live Render environment. The blueprint entry was changed from a hardcoded `false` to `sync: false` so a future blueprint sync preserves the dashboard value. The live value remained `true` after the PR #5 auto-deploy. Render's [Blueprint specification](https://render.com/docs/blueprint-spec) documents this behavior. No paid plan, trial, payment method, or Sprint 9 work was activated.
 
-The scheduled [beta maintenance workflow](../.github/workflows/beta-maintenance.yml) is still disabled. `BETA_APP_URL` is set to the live beta URL as a repository variable. The seven GitHub Actions secrets for the limited database role, private storage and protected reminder worker have not been added; `BETA_MAINTENANCE_ENABLED` remains unset. An October 12 preflight found zero expired, unlinked receipt cleanup candidates. Until the secrets are added, a manual workflow run passes, and the schedule is enabled, receipt cleanup and reminders require an operator run; the live reminder test below was manual.
+The scheduled [beta maintenance workflow](../.github/workflows/beta-maintenance.yml) is enabled with seven GitHub Actions secrets for the limited database role, private storage and protected reminder worker, plus repository variables `BETA_APP_URL` and `BETA_MAINTENANCE_ENABLED=true`. The [successful manual run](https://github.com/IgnasGaj/cekis/actions/runs/38217798669) on October 12 completed cleanup with zero candidates examined, zero deleted and zero failed; the reminder worker reported zero claimed, accepted, retried, failed, uncertain and cancelled. An earlier manual run failed at database hostname resolution before cleanup; the invalid secret values were replaced from the ignored local environment file before the successful rerun. The cron is hourly at minute 23 UTC, subject to GitHub schedule delivery. The live reminder test below was manual.
 
 ## Live verification ledger
 
@@ -23,10 +23,10 @@ The scheduled [beta maintenance workflow](../.github/workflows/beta-maintenance.
 | Anonymous access | Anonymous receipt listing and original-content requests returned 401. The purchase detail redirected to sign-in; unauthenticated worker POST returned 401. |
 | Reminder | The owner opted in with a 30-day offset and set a disposable warranty due 2026-11-10. The protected worker reported one accepted send; the reminder appeared in iCloud Junk. A second run reported zero sends, confirming deduplication. The purchase UI showed accepted delivery status. |
 | Other account isolation | A second magic link reached `ignacijusg@gmail.com` in Gmail and signed into a separate beta account. Settings showed that address; home and purchases were empty. Opening the first account's known purchase URL displayed “Pirkinys nerastas” and “Šio pirkinio nėra arba jo negali peržiūrėti.” The first account's receipt-content URL could not be checked in that browser because navigation was blocked by the browser client. |
-| Scheduled maintenance | Not yet enabled or tested in GitHub Actions. |
+| Scheduled maintenance | Seven repository secrets and the live URL variable are configured. The enabled workflow completed both cleanup and reminder steps in a manual GitHub Actions run; its first scheduled execution with the enabled gate has not yet occurred. |
 | Physical devices | iPhone Safari, Android camera capture and an actual phone viewport have not been verified. |
 
-The disposable purchase and receipt originals created for these checks should be deleted before a tester invitation. The absent scheduler and incomplete direct receipt-content isolation check limit readiness for an unattended tester invitation.
+The disposable purchase and receipt originals created for these checks should be deleted before a tester invitation. The scheduled run has not yet been observed with the enabled gate, and the direct receipt-content isolation check remains incomplete.
 
 ## Operations and recovery
 
@@ -40,4 +40,4 @@ Account deletion is still an operator procedure: authenticate the request, expor
 
 ## Tester handoff
 
-Once scheduled maintenance and recovery checks are complete, share only the verified URL with about 5–10 friends. Ask each to save three varied receipts, correct one OCR result, retrieve an original after returning, edit and delete a disposable purchase, and report phone/browser plus expected and actual behavior. No tester invitations were sent during this deployment.
+Once the remaining recovery checks are complete, share only the verified URL with about 5–10 friends. Ask each to save three varied receipts, correct one OCR result, retrieve an original after returning, edit and delete a disposable purchase, and report phone/browser plus expected and actual behavior. No tester invitations were sent during this deployment.
