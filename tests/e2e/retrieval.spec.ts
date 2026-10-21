@@ -136,17 +136,17 @@ test("apie 200 pirkinių lieka pasiekiami per paiešką, rikiavimą, čekį ir p
   await expect(page.getByRole("heading", { name: /Surandamas/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "← Mano pirkiniai" })).toHaveAttribute("href", "/pirkiniai?q=SURANDAMAS&sort=oldest");
   const png = await sharp({ create: { width: 24, height: 24, channels: 3, background: "teal" } }).png().toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "bandymo-cekis.png", mimeType: "image/png", buffer: png });
   await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
   await page.getByRole("button", { name: "Įkelti čekį" }).click();
-  await expect(page.getByRole("link", { name: "Peržiūrėti čekį" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Atidaryti čekį" })).toBeVisible();
   const receiptId = await withDb(async (client) => (await client.query<{ id: string }>(
     "SELECT id FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [seeded.special])).rows[0].id);
   const bytes = await page.request.get(`/api/receipts/${receiptId}/content?download=1`);
   expect(bytes.status()).toBe(200);
   expect(createHash("sha256").update(await bytes.body()).digest("hex")).toBe(createHash("sha256").update(png).digest("hex"));
-  const [preview] = await Promise.all([page.waitForEvent("popup"), page.getByRole("link", { name: "Peržiūrėti čekį" }).click()]);
+  const [preview] = await Promise.all([page.waitForEvent("popup"), page.getByRole("link", { name: "Atidaryti čekį" }).click()]);
   await expect(preview).toHaveURL(new RegExp(`/api/receipts/${receiptId}/content`));
   await preview.close();
   const attach = await page.request.post(`/api/receipts/${receiptId}/links`, {

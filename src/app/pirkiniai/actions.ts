@@ -13,21 +13,18 @@ export async function createAction(_state: FormState, form: FormData): Promise<F
   await requireSession();
   const parsed = parsePurchaseFields(fieldsFromForm(form));
   if (!parsed.value) return { errors: parsed.errors };
-  const draft = warrantyFromForm(form);
-  const warranty = draft ? parseWarranty(draft, parsed.value.purchaseDate) : null;
-  if (warranty && !warranty.value) return { errors: { warranty: warranty.error } };
   const key = form.get("submissionKey");
   if (typeof key !== "string" || !isPurchaseId(key)) return { errors: { form: "Atnaujink puslapį ir bandyk dar kartą." } };
   let id: string | null;
   let saved: Awaited<ReturnType<typeof getPurchase>>;
   try {
-    id = await createPurchase(key, parsed.value, warranty?.value ?? undefined);
+    id = await createPurchase(key, parsed.value);
     saved = id ? await getPurchase(id) : null;
   }
   catch (error) { unstable_rethrow(error); return failed; }
   if (!id) return { errors: { form: "Šis įrašas jau ištrintas. Pridėk pirkinį iš naujo." } };
   if (!saved) return { errors: { form: "Pirkinys nerastas. Atnaujink puslapį ir patikrink pirkinių sąrašą." } };
-  if (!purchaseMatchesSubmitted(saved, parsed.value, warranty?.value ?? undefined))
+  if (!purchaseMatchesSubmitted(saved, parsed.value))
     return { errors: { form: "Pirkinys jau išsaugotas su kitais duomenimis. Patikrink jį ir prireikus redaguok; ši forma liko nepakeista." }, existingPurchaseId: id };
   revalidatePath("/pirkiniai");
   revalidatePath("/pradzia");
@@ -36,7 +33,7 @@ export async function createAction(_state: FormState, form: FormData): Promise<F
 
 export async function editAction(id: string, context: string, _state: FormState, form: FormData): Promise<FormState> {
   await requireSession();
-  const parsed = parsePurchaseFields(fieldsFromForm(form));
+  const parsed = parsePurchaseFields(fieldsFromForm(form), undefined, true);
   if (!parsed.value) return { errors: parsed.errors };
   const draft = warrantyFromForm(form);
   const saved = await getPurchase(id);
@@ -44,10 +41,13 @@ export async function editAction(id: string, context: string, _state: FormState,
   const existing = { warrantyState: saved.warrantyState, warrantyEndDate: saved.warrantyEndDate, warrantyDurationMonths: saved.warrantyDurationMonths, warrantySource: saved.warrantySource } as WarrantyInput;
   const warranty = draft ? parseWarranty(draft, parsed.value.purchaseDate, existing) : null;
   if (warranty && !warranty.value) return { errors: { warranty: warranty.error } };
+  const warrantyChanged = Boolean(warranty?.value && (warranty.value.warrantyState !== existing.warrantyState ||
+    warranty.value.warrantySource !== existing.warrantySource || warranty.value.warrantyDurationMonths !== existing.warrantyDurationMonths ||
+    (existing.warrantySource === "date" && warranty.value.warrantyEndDate !== existing.warrantyEndDate)));
   const revision = Number(form.get("expectedRevision"));
   if (!Number.isSafeInteger(revision) || revision < 1) return { errors: { form: "Atnaujink puslapį ir patikrink naujausius duomenis." } };
   let updated: Awaited<ReturnType<typeof updatePurchase>>;
-  try { updated = await updatePurchase(id, parsed.value, revision, warranty?.value ?? undefined); }
+  try { updated = await updatePurchase(id, parsed.value, revision, warrantyChanged ? warranty!.value! : undefined); }
   catch (error) { unstable_rethrow(error); return failed; }
   if (updated !== "updated") return { errors: { form: updated === "missing" ? "Pirkinys nerastas." : updated === "review" ? "Pasikeitė pirkimo data. Patvirtink garantijos pabaigą." : "Pirkinys pasikeitė kitur. Atnaujink puslapį, peržiūrėk pakeitimus ir bandyk dar kartą." } };
   revalidatePath("/pirkiniai");

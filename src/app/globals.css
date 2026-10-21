@@ -169,3 +169,21 @@ form input[aria-invalid="true"] { border-color: #b32934; }
 .reminder-check input { width: 22px; height: 22px; flex: none; accent-color: var(--teal); }
 .reminder-form .primary-button, .reminder-form .secondary-button { margin-top: 4px; }
 .reminder-form .form-help { color: var(--muted); font-size: 14px; margin: 0; }
+.manual-entry-link { display: flex; justify-content: center; margin: 18px auto 0; }
+.receipt-preview { display: block; }
+.receipt-preview summary, .receipt-review-preview summary, .receipt-more summary { display: flex; align-items: center; min-height: 48px; cursor: pointer; font-weight: 700; color: var(--teal-dark); list-style-position: inside; }
+.receipt-preview summary, .receipt-review-preview summary { gap: 12px; overflow-wrap: anywhere; }
+.receipt-preview summary .receipt-thumbnail, .receipt-review-preview summary .receipt-thumbnail { width: 48px; height: 48px; flex: none; margin: 0; border-radius: 8px; object-fit: cover; }
+.receipt-pdf-icon { display: grid; place-items: center; background: var(--teal-tint); color: var(--teal-dark); font-size: 11px; }
+.receipt-preview img { margin-top: 12px; }
+.receipt-review-preview { display: block; padding: 10px 16px; text-align: left; }
+.receipt-review-preview img, .receipt-review-preview iframe { margin-top: 12px; }
+.receipt-more { margin: 6px 0 18px; padding: 0 16px; border: 1px solid var(--border); border-radius: 14px; background: white; }
+.receipt-more[open] { padding-bottom: 4px; }
+.receipt-entry-form .field, .receipt-review-form .field { margin-bottom: 14px; }
+.receipt-entry-form label, .receipt-review-form label { margin-bottom: 6px; }
+.receipt-entry-form input, .receipt-review-form input, .receipt-entry-form select, .receipt-review-form select { min-height: 48px; }
+.receipt-entry-form .primary-button, .receipt-review-form .primary-button { margin-top: 12px; margin-bottom: max(12px, env(safe-area-inset-bottom)); }
+.warranty-detail-control .secondary-button { margin-top: 14px; }
+.warranty-detail-control fieldset { border: 0; padding: 0; min-width: 0; }
+.app-shell:has(.receipt-entry-form) .bottom-nav, .app-shell:has(.receipt-review-form) .bottom-nav { position: static; left: auto; bottom: auto; transform: none; width: 100%; margin-top: 36px; border-radius: 18px; border-bottom: 1px solid var(--border); }

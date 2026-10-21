@@ -18,14 +18,14 @@ export function validPurchaseDate(value: string, today = todayInVilnius()): bool
   return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day;
 }
 
-export function parsePurchaseFields(fields: PurchaseFields, today = todayInVilnius()) {
+export function parsePurchaseFields(fields: PurchaseFields, today = todayInVilnius(), allowIncomplete = false) {
   const errors: PurchaseErrors = {};
   const productName = fields.productName.trim();
   const seller = fields.seller.trim();
   const notes = fields.notes.trim() || null;
-  if (!productName || productName.length > 200) errors.productName = !productName ? "Įvesk prekės pavadinimą" : "Prekės pavadinimas per ilgas (iki 200 ženklų)";
-  if (!seller || seller.length > 200) errors.seller = !seller ? "Įvesk pardavėją" : "Pardavėjo pavadinimas per ilgas (iki 200 ženklų)";
-  if (!validPurchaseDate(fields.purchaseDate, today)) errors.purchaseDate = "Pasirink tinkamą pirkimo datą";
+  if ((!productName && !allowIncomplete) || productName.length > 200) errors.productName = !productName ? "Įvesk prekės pavadinimą" : "Prekės pavadinimas per ilgas (iki 200 ženklų)";
+  if ((!seller && !allowIncomplete) || seller.length > 200) errors.seller = !seller ? "Įvesk pardavėją" : "Pardavėjo pavadinimas per ilgas (iki 200 ženklų)";
+  if ((fields.purchaseDate || !allowIncomplete) && !validPurchaseDate(fields.purchaseDate, today)) errors.purchaseDate = "Pasirink tinkamą pirkimo datą";
   if (notes && notes.length > 2000) errors.notes = "Pastabos per ilgos (iki 2000 ženklų)";
   let price: string | null = null;
   let currency: Currency | null = null;
@@ -41,7 +41,7 @@ export function parsePurchaseFields(fields: PurchaseFields, today = todayInVilni
   } else if (fields.currency && !currencies.includes(fields.currency as Currency)) {
     errors.currency = "Pasirink palaikomą valiutą";
   }
-  return { errors, value: Object.keys(errors).length ? null : { productName, seller, purchaseDate: fields.purchaseDate, price, currency, notes } };
+  return { errors, value: Object.keys(errors).length ? null : { productName, seller, purchaseDate: fields.purchaseDate || null, price, currency, notes } };
 }
 
 export function fieldsFromForm(form: FormData): PurchaseFields {

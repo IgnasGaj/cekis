@@ -25,7 +25,7 @@ export function useReceiptScan(today: string, onResult: (suggestions: ReceiptSug
 }
 export function ReceiptScanControls({ scan, retry }: { scan: ReturnType<typeof useReceiptScan>; retry: () => void }) {
   return <section className="ocr-controls" aria-label="Čekio nuskaitymas">
-    <p role="status" aria-live="polite">{scan.state === "loading" ? `Nuskaitome čekį… ${scan.progress} %` : scan.state === "ready" ? "Nuskaityta. Patikrink pasiūlytus duomenis prieš išsaugodamas." : scan.state === "empty" ? "Patikimų duomenų atpažinti nepavyko. Bandyk dar kartą arba įvesk rankiniu būdu." : scan.state === "cancelled" ? "Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu." : scan.state === "failed" ? scan.error : "Pasirinktas čekis bus nuskaitytas automatiškai."}</p>
+    <p role="status" aria-live="polite">{scan.state === "loading" ? `Nuskaitomas čekis… ${scan.progress} %` : scan.state === "ready" ? "Nuskaityta. Patikrink pasiūlytus duomenis prieš išsaugodamas." : scan.state === "empty" ? "Patikimų duomenų atpažinti nepavyko. Bandyk dar kartą arba įvesk rankiniu būdu." : scan.state === "cancelled" ? "Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu." : scan.state === "failed" ? scan.error : "Pasirinktas čekis bus nuskaitytas automatiškai."}</p>
     {scan.state === "loading" ? <><progress value={scan.progress} max={100} aria-label="Nuskaitymo eiga" /><button type="button" className="secondary-button" onClick={scan.cancel}>Atšaukti nuskaitymą</button></> : <button type="button" className="secondary-button" onClick={retry}>Bandyti nuskaityti dar kartą</button>}
   </section>;
 }

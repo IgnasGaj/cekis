@@ -10,6 +10,7 @@ import { todayInVilnius } from "@/lib/purchase-validation";
 import { dayPhrase, warrantyStatus } from "@/lib/warranty";
 import { getPurchaseReminderSummary } from "@/lib/reminders";
 import { ReminderControl } from "./reminder-control";
+import { WarrantyControl } from "./warranty-control";
 
 export const dynamic = "force-dynamic";
 export default async function PurchaseDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -31,22 +32,24 @@ export default async function PurchaseDetailPage({ params, searchParams }: { par
   const reminderStatus = await getPurchaseReminderSummary(row.ownerId,row);
   return <PurchaseShell>
     <Link href={listHref(context)} className="back-link">← Mano pirkiniai</Link>
-    <section className="page-heading detail-heading"><h1>{row.productName}</h1><p>{row.seller}</p></section>
+    <section className="page-heading detail-heading"><h1>{row.productName || "Čekis be pavadinimo"}</h1><p>{row.seller || "Pardavėjas nenurodytas"}</p></section>
+    {attachedPage.receipts[0] && <a className="small-action" href={`/api/receipts/${attachedPage.receipts[0].id}/content`} target="_blank" rel="noreferrer">Atidaryti čekį</a>}
     {single("busena") === "issaugota" && <p className="notice" role="status">Pirkinys išsaugotas</p>}
     {single("busena") === "atnaujinta" && <p className="notice" role="status">Pakeitimai išsaugoti</p>}
     {single("busena") === "cekis-pridetas" && <p className="notice" role="status">Čekis pridėtas</p>}
     <section className="detail-card" aria-label="Pirkinio informacija">
-      <div className="detail-row"><span>Pardavėjas</span><strong>{row.seller}</strong></div>
+      <div className="detail-row"><span>Pardavėjas</span><strong>{row.seller || "Nenurodyta"}</strong></div>
       <div className="detail-row"><span>Pirkimo data</span><strong>{displayDate(row.purchaseDate)}</strong></div>
       {row.price && row.currency && <div className="detail-row"><span>Kaina</span><strong>{displayPrice(row.price, row.currency)}</strong></div>}
       {row.notes && <div className="detail-row"><span>Pastabos</span><p className="notes-text">{row.notes}</p></div>}
     </section>
-    <ReminderControl id={id} mode={row.reminderMode} offset={row.reminderOffset} revision={row.revision} status={reminderStatus} />
     <section className="placeholder-card" aria-label="Garantijos informacija"><h2>Garantija</h2><p><strong>{status.label}</strong></p>
-      {row.warrantyEndDate && <p>Pabaigos data: {displayDate(row.warrantyEndDate)}</p>}
+      {row.warrantyEndDate && <p>Garantija iki {displayDate(row.warrantyEndDate)}</p>}
+      {row.warrantyOrigin === "automatic" && row.warrantyState === "known" && <p className="small-note">Automatiškai nustatyta: 24 mėn.</p>}
       {status.days !== null && status.days >= 0 && <p>{dayPhrase(status.days)}</p>}
-      <Link className="text-link" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Keisti garantijos informaciją</Link>
+      <WarrantyControl id={id} revision={row.revision} purchaseDate={row.purchaseDate} warranty={{ warrantyState: row.warrantyState as "known" | "unknown" | "none", warrantyEndDate: row.warrantyEndDate, warrantyDurationMonths: row.warrantyDurationMonths, warrantySource: row.warrantySource as "date" | "duration" | null }} />
     </section>
+    <ReminderControl id={id} mode={row.reminderMode} offset={row.reminderOffset} revision={row.revision} status={reminderStatus} />
     <ReceiptManager purchaseId={id} attachedPage={attachedPage} availablePage={availablePage} />
     <Link className="primary-button" href={`/pirkiniai/${id}/redaguoti${contextQuery.size ? `?${contextQuery}` : ""}`}>Redaguoti</Link>
     <DeleteButton id={id} productName={row.productName} context={contextQuery.toString()} />
