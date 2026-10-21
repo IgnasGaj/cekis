@@ -447,13 +447,15 @@ test("pakartojimas, atšaukimas, validacija ir valymas", async ({ page }) => {
   expect((await page.request.get(`/api/receipts/${id}/content`)).status()).toBe(404);
   await db(async (client) => { await client.query("UPDATE receipt SET expires_at='2000-01-01' WHERE id=$1", [id]); });
   const { execFileSync } = await import("node:child_process");
-  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...process.env, S3_ENDPOINT: "http://127.0.0.1:9", AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9" } });
+  const storageEnv = { ...process.env, AWS_REGION: process.env.S3_REGION, AWS_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY };
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...storageEnv, S3_ENDPOINT: "http://127.0.0.1:9", AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9" } });
   await db(async (client) => {
     const state = await client.query("SELECT state,cleanup_attempts FROM receipt WHERE id=$1", [id]);
     expect(state.rows[0]).toMatchObject({ state: "deleting", cleanup_attempts: 1 });
     await client.query("UPDATE receipt SET expires_at='2000-01-01' WHERE id=$1", [id]);
   });
-  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: process.env });
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...storageEnv, AWS_ENDPOINT_URL_S3: process.env.S3_ENDPOINT } });
   await db(async (client) => expect((await client.query("SELECT state FROM receipt WHERE id=$1", [id])).rows[0].state).toBe("deleted"));
   const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region: process.env.S3_REGION, forcePathStyle: true, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID!, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY! } });
   await expect(s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: row.object_key }))).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } });
