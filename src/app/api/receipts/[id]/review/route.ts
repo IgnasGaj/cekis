@@ -4,7 +4,7 @@ import { pool } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { isPurchaseId } from "@/lib/purchases";
 import { parsePurchaseFields, type PurchaseFields } from "@/lib/purchase-validation";
-import { parseWarranty, type WarrantyDraft } from "@/lib/warranty";
+import { addMonthsClamped } from "@/lib/warranty";
 import { reconcilePurchase } from "@/lib/reminders";
 
 export const runtime = "nodejs";
@@ -22,12 +22,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const expectedReceiptNumber = body.expectedReceiptNumber;
   if (expectedReceiptNumber !== undefined && (typeof expectedReceiptNumber !== "string" || expectedReceiptNumber.length > 100))
     return Response.json({ error: "Atnaujink puslapį ir bandyk dar kartą." }, { status: 400 });
-  const parsed = parsePurchaseFields(Object.fromEntries(keys.map((key) => [key, body[key]])) as PurchaseFields);
+  const parsed = parsePurchaseFields(Object.fromEntries(keys.map((key) => [key, body[key]])) as PurchaseFields, undefined, true);
   if (!parsed.value) return Response.json({ errors: parsed.errors }, { status: 400 });
-  const warrantyFields = ["warrantyState", "warrantyEndDate", "warrantyDurationMonths", "warrantySource"] as const;
-  const warrantySupplied = warrantyFields.some((key) => Object.hasOwn(body, key)) || Object.hasOwn(body, "warrantyConfirmed");
-  if (warrantySupplied && (warrantyFields.some((key) => typeof body[key] !== "string") || typeof body.warrantyConfirmed !== "boolean"))
-    return Response.json({ errors: { warranty: "Patikrink garantijos informaciją." } }, { status: 400 });
   const expectedRevision = body.expectedRevision;
   if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) return Response.json({ error: "Atnaujink puslapį ir bandyk dar kartą." }, { status: 400 });
   const client = await pool.connect();
@@ -41,11 +37,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!linked.rowCount) { await client.query("ROLLBACK"); return Response.json({ error: "Čekis nerastas arba nebepridėtas prie pirkinio." }, { status: 404 }); }
     const value = parsed.value;
     const current = existing.rows[0];
-    const warranty = warrantySupplied ? parseWarranty(body as WarrantyDraft, value.purchaseDate, {
-      warrantyState: current.warranty_state, warrantyEndDate: dateText(current.warranty_end_date),
-      warrantyDurationMonths: current.warranty_duration_months, warrantySource: current.warranty_source,
-    }) : null;
-    if (warranty && !warranty.value) { await client.query("ROLLBACK"); return Response.json({ errors: { warranty: warranty.error } }, { status: 400 }); }
+    const dateChanged = dateText(current.purchase_date) !== value.purchaseDate;
+    if (dateChanged && current.warranty_source === "date" && value.purchaseDate && value.purchaseDate > dateText(current.warranty_end_date)!) {
+      await client.query("ROLLBACK"); return Response.json({ errors: { purchaseDate: "Pirkimo data negali būti vėlesnė už išsaugotą garantijos pabaigą." } }, { status: 400 });
+    }
+    const nextEnd = dateChanged && current.warranty_source === "duration" && current.warranty_duration_months
+      ? value.purchaseDate ? addMonthsClamped(value.purchaseDate, current.warranty_duration_months) : null : dateText(current.warranty_end_date);
     const wantedNumber = receiptNumber.trim() || null;
     const currentNumber = linked.rows[0].receipt_number as string | null;
     // Older clients may replay an unchanged number, but cannot change shared metadata without a snapshot.
@@ -56,19 +53,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (expectedRevision !== current.revision) {
       const unchanged = current.product_name === value.productName && current.seller === value.seller && dateText(current.purchase_date) === value.purchaseDate &&
         current.price === value.price && current.currency === value.currency && current.notes === value.notes && currentNumber === wantedNumber &&
-        (!warranty?.value || (current.warranty_state === warranty.value.warrantyState && dateText(current.warranty_end_date) === warranty.value.warrantyEndDate && current.warranty_duration_months === warranty.value.warrantyDurationMonths && current.warranty_source === warranty.value.warrantySource));
+        dateText(current.warranty_end_date) === nextEnd;
       if (!unchanged) { await client.query("ROLLBACK"); return Response.json({ error: "Pirkinys pasikeitė kitur. Atnaujink puslapį ir peržiūrėk pakeitimus." }, { status: 409 }); }
       await client.query("COMMIT");
       return Response.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
     }
-    if (!warranty && current.warranty_state === "known" && dateText(current.purchase_date) !== value.purchaseDate) {
-      await client.query("ROLLBACK"); return Response.json({ errors: { warranty: "Pasikeitė pirkimo data. Patvirtink garantijos pabaigą." } }, { status: 400 });
-    }
     await client.query(`UPDATE purchase SET product_name=$1,seller=$2,purchase_date=$3,price=$4,currency=$5,notes=$6,
-      warranty_state=coalesce($9,warranty_state),warranty_end_date=case when $9::text is null then warranty_end_date else $10::date end,
-      warranty_duration_months=case when $9::text is null then warranty_duration_months else $11::integer end,
-      warranty_source=case when $9::text is null then warranty_source else $12::text end,revision=revision+1,updated_at=now()
-      WHERE id=$7 AND owner_id=$8`, [value.productName,value.seller,value.purchaseDate,value.price,value.currency,value.notes,body.purchaseId,session.user.id,warranty?.value?.warrantyState ?? null,warranty?.value?.warrantyEndDate ?? null,warranty?.value?.warrantyDurationMonths ?? null,warranty?.value?.warrantySource ?? null]);
+      warranty_end_date=$9,revision=revision+1,updated_at=now()
+      WHERE id=$7 AND owner_id=$8`, [value.productName,value.seller,value.purchaseDate,value.price,value.currency,value.notes,body.purchaseId,session.user.id,nextEnd]);
     if (currentNumber !== wantedNumber) await client.query("UPDATE receipt SET receipt_number=$1,updated_at=now() WHERE id=$2 AND owner_id=$3", [wantedNumber,id,session.user.id]);
     await reconcilePurchase(client,session.user.id,body.purchaseId);
     await client.query("COMMIT");

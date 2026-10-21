@@ -15,12 +15,15 @@ describe("confirmed warranty calendar rules", () => {
   });
   it("defaults new records and authoritatively calculates supported durations", () => {
     expect(defaultWarranty("2026-10-08")).toEqual({ warrantyState: "known", warrantySource: "duration", warrantyDurationMonths: 24, warrantyEndDate: "2028-10-08" });
+    expect(defaultWarranty(null)).toEqual({ warrantyState: "known", warrantySource: "duration", warrantyDurationMonths: 24, warrantyEndDate: null });
     for (const months of [6, 12, 24, 36]) {
       const draft = { warrantyState: "known", warrantyEndDate: "9999-12-31", warrantyDurationMonths: String(months), warrantySource: "duration", warrantyConfirmed: false };
       expect(parseWarranty(draft, "2025-08-31").value?.warrantyEndDate).toBe(addMonthsClamped("2025-08-31", months));
     }
     const base = { warrantyState: "known", warrantyEndDate: "", warrantyDurationMonths: "24", warrantySource: "duration", warrantyConfirmed: true };
-    for (const months of ["1", "48", "1.5", "Infinity", "600"]) expect(parseWarranty({ ...base, warrantyDurationMonths: months }, "2026-01-31").value).toBeNull();
+    for (const months of ["1", "48", "600"]) expect(parseWarranty({ ...base, warrantyDurationMonths: months }, "2026-01-31").value?.warrantyEndDate).toBe(addMonthsClamped("2026-01-31", Number(months)));
+    for (const months of ["0", "601", "1.5", "Infinity"]) expect(parseWarranty({ ...base, warrantyDurationMonths: months }, "2026-01-31").value).toBeNull();
+    expect(parseWarranty(base, null).value?.warrantyEndDate).toBeNull();
     expect(parseWarranty(base, "2026-02-29").value).toBeNull();
     expect(parseWarranty({ ...base, warrantyState: "none" }, "2026-01-31").value).toBeNull();
     expect(parseWarranty({ ...base, warrantySource: "date" }, "2026-01-31").value).toBeNull();
@@ -30,7 +33,7 @@ describe("confirmed warranty calendar rules", () => {
     const legacy: WarrantyInput = { warrantyState: "known", warrantySource: "date", warrantyDurationMonths: null, warrantyEndDate: "2028-01-31" };
     const draft = { warrantyState: "known", warrantyEndDate: "2029-01-01", warrantyDurationMonths: "48", warrantySource: "duration", warrantyConfirmed: false };
     expect(parseWarranty(draft, "2024-02-29", duration).value?.warrantyEndDate).toBe("2028-02-29");
-    expect(parseWarranty(draft, "2024-02-29").value).toBeNull();
+    expect(parseWarranty(draft, "2024-02-29").value?.warrantyEndDate).toBe("2028-02-29");
     expect(parseWarranty({ ...draft, warrantySource: "date", warrantyDurationMonths: "", warrantyEndDate: "2028-01-31" }, "2024-02-29", legacy).value).toEqual(legacy);
     expect(parseWarranty({ ...draft, warrantySource: "date", warrantyDurationMonths: "" }, "2024-02-29", legacy).value).toBeNull();
     expect(parseWarranty({ ...draft, warrantySource: "date", warrantyDurationMonths: "", warrantyEndDate: "2028-01-31" }, "2024-02-29").value).toBeNull();
@@ -38,6 +41,7 @@ describe("confirmed warranty calendar rules", () => {
   it("keeps unknown and none separate without a countdown", () => {
     expect(warrantyStatus({ warrantyState: "unknown", warrantyEndDate: null }, "2026-10-06")).toEqual({ label: "Garantija nenurodyta", days: null });
     expect(warrantyStatus({ warrantyState: "none", warrantyEndDate: null }, "2026-10-06")).toEqual({ label: "Pažymėta: garantijos nėra", days: null });
+    expect(warrantyStatus({ warrantyState: "known", warrantyEndDate: null }, "2026-10-06")).toEqual({ label: "Garantijos pabaiga nežinoma", days: null });
   });
   it("uses inclusive civil days across DST, year change and leap day", () => {
     expect(remainingDays("2026-03-29", "2026-03-28")).toBe(1);

@@ -14,6 +14,13 @@ describe("pirkinio laukų tikrinimas", () => {
     expect(parsePurchaseFields({ ...base, seller: "x".repeat(201) }).errors.seller).toBeTruthy();
     expect(parsePurchaseFields({ ...base, notes: "x".repeat(2001) }).errors.notes).toBeTruthy();
   });
+  it("leidžia neužpildytą čekio įrašą, bet tikrina įvestus laukus", () => {
+    const empty = { ...base, productName: "", seller: "", purchaseDate: "" };
+    expect(parsePurchaseFields(empty, "2026-10-06", true).value).toMatchObject({ productName: "", seller: "", purchaseDate: null });
+    expect(parsePurchaseFields(empty, "2026-10-06").value).toBeNull();
+    expect(parsePurchaseFields({ ...empty, price: "1.234" }, "2026-10-06", true).errors.price).toBeTruthy();
+    expect(parsePurchaseFields({ ...empty, purchaseDate: "2026-02-29" }, "2026-10-06", true).errors.purchaseDate).toBeTruthy();
+  });
   it("saugo dviejų dešimtųjų tikslumo kainą kaip tekstą ir valiutą", () => {
     expect(parsePurchaseFields({ ...base, price: "0", currency: "PLN" }).value).toMatchObject({ price: "0.00", currency: "PLN" });
     expect(parsePurchaseFields({ ...base, price: "12,5", currency: "USD" }).value).toMatchObject({ price: "12.50", currency: "USD" });

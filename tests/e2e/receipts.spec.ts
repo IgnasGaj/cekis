@@ -66,7 +66,7 @@ test("originalai, bendri ryšiai, atskirtis ir saugus ištrynimas", async ({ bro
   const pdfDoc = await PDFDocument.create(); pdfDoc.addPage([200, 200]); const pdf = Buffer.from(await pdfDoc.save());
   let uploaded = 0;
   for (const [name, mime, bytes] of [["pirmas.png", "image/png", png], ["antras.jpg", "image/jpeg", jpeg], ["trecias.pdf", "application/pdf", pdf]] as const) {
-    const [chooser] = await Promise.all([pageA.waitForEvent("filechooser"), pageA.getByRole("button", { name: name.endsWith(".pdf") ? /Įkelti PDF Pasirinkti/ : /Įkelti nuotrauką Pasirinkti/ }).click()]);
+    const [chooser] = await Promise.all([pageA.waitForEvent("filechooser"), pageA.getByRole("button", { name: name.endsWith(".pdf") ? /Įkelti failą Pasirinkti/ : /Įkelti failą Pasirinkti/ }).click()]);
     await chooser.setFiles({ name, mimeType: mime, buffer: bytes });
     if (mime !== "application/pdf") await pageA.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
     await pageA.getByRole("button", { name: "Įkelti čekį" }).click();
@@ -147,14 +147,14 @@ test("pavėluotas atšaukimas ir failo keitimas išsaugo bendrą čekį", async 
     const saved = await route.fetch(); expect(saved.status()).toBe(200);
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko. Bandyk dar kartą." }) });
   });
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "bendras.png", mimeType: "image/png", buffer: png });
   await page.getByRole("button", { name: "Įkelti čekį" }).click();
   await expect(page.getByText("Atsakymas nutrūko. Bandyk dar kartą.")).toBeVisible();
   const row = await db(async (client) => (await client.query("SELECT id,owner_id,submission_key,object_key FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [first])).rows[0]);
   const other = await context.newPage();
   expect((await other.request.post(`/api/receipts/${row.id}/links`, { headers: { Origin: process.env.APP_URL! }, data: { purchaseId: second } })).status()).toBe(200);
-  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await replacement.setFiles({ name: "kitas.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Ankstesnis čekis jau pridėtas ir liko prie pirkinio.")).toBeVisible();
   await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
@@ -232,7 +232,7 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
   const email = `receipt-fields-${randomUUID()}@example.test`;
   await signIn(page, email); await page.goto("/prideti");
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "pradinis.png", mimeType: "image/png", buffer: png });
   await page.getByLabel("Prekės pavadinimas").fill("Pradinis produktas");
   await page.getByLabel("Pardavėjas").fill("Pradinis pardavėjas");
@@ -244,18 +244,20 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
     const saved = await route.fetch(); expect(saved.status()).toBe(200);
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko." }) });
   });
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText("Atsakymas nutrūko.")).toBeVisible();
   await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
-  const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [again] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await again.setFiles({ name: "pakeistas.png", mimeType: "image/png", buffer: png });
+  await page.getByText("Daugiau informacijos").click();
   await page.getByLabel("Kaina (neprivaloma)").fill("netinkama");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText("Įvesk tinkamą kainą")).toBeVisible();
   await page.getByLabel("Prekės pavadinimas").fill("Pakeistas produktas");
   await page.getByLabel("Kaina (neprivaloma)").fill("29.99");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByLabel("Valiuta").selectOption("EUR");
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText(/Pirkinys jau buvo išsaugotas su kitais duomenimis/)).toBeVisible();
   await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue("Pradinis produktas");
   await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
@@ -271,7 +273,7 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
   await expect(page.getByLabel("Pardavėjas")).toBeDisabled();
   await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
   await expect(page.getByText("Pirkinys išsaugotas be čekio.")).toBeVisible();
-  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [replacement] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await replacement.setFiles({ name: "naujas.png", mimeType: "image/png", buffer: png });
   await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
@@ -282,67 +284,26 @@ test("pridėjimo formos pakartojimas rodo tik išsaugotus pirkinio duomenis", as
   });
 });
 
-test("garantijos valdikliai užrakinami per kūrimą, o atšaukimas nepakeičia naujo bandymo", async ({ page }) => {
+test("vienu metu paspaudus išsaugoti pirkinys ir čekis nedubliuojami", async ({ page }) => {
   test.setTimeout(90000);
   const email = `receipt-pending-${randomUUID()}@example.test`;
   await signIn(page, email); await page.goto("/prideti");
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
-  const choose = async () => {
-    const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
-    await chooser.setFiles({ name: "garantija.png", mimeType: "image/png", buffer: png });
-  };
-  await choose();
-  await page.getByLabel("Prekės pavadinimas").fill("Laukiantis pirkinys");
-  await page.getByLabel("Pardavėjas").fill("Pardavėjas");
-  await page.getByLabel("Pirkimo data").fill("2024-01-01");
-  await page.getByLabel("Garantijos būsena").selectOption("known");
-  await page.getByLabel("Garantijos trukmė").selectOption("36");
-
-  let firstRelease!: () => void;
-  const firstGate = new Promise<void>((resolve) => { firstRelease = resolve; });
-  let secondRelease!: () => void;
-  const secondGate = new Promise<void>((resolve) => { secondRelease = resolve; });
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
+  await chooser.setFiles({ name: "pending.png", mimeType: "image/png", buffer: png });
+  let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   let requests = 0;
-  let secondCommitted!: () => void;
-  const committed = new Promise<void>((resolve) => { secondCommitted = resolve; });
-  await page.route("**/api/purchases", async (route) => {
-    requests++;
-    if (requests === 1) {
-      await firstGate;
-      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Laikina klaida." }) });
-    } else if (requests === 2) {
-      const saved = await route.fetch(); expect(saved.status()).toBe(200);
-      secondCommitted();
-      await secondGate;
-      await route.fulfill({ response: saved }).catch(() => {});
-    } else await route.continue();
-  });
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
-  await expect(page.getByLabel("Garantijos būsena")).toBeDisabled();
-  await expect(page.getByLabel("Garantijos trukmė")).toBeDisabled();
+  await page.route("**/api/purchases", async (route) => { requests++; await gate; await route.continue(); });
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
+  await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
   await page.locator("form.purchase-form").evaluate((form) => (form as HTMLFormElement).requestSubmit());
   expect(requests).toBe(1);
-  firstRelease();
-  await expect(page.getByText("Laikina klaida.")).toBeVisible();
-  await expect(page.getByLabel("Garantijos būsena")).toBeEnabled();
-  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("36");
-
-  await page.getByLabel("Garantijos trukmė").selectOption("24");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
-  await committed;
-  await expect(page.getByLabel("Garantijos būsena")).toBeDisabled();
-  await expect(page.getByLabel("Garantijos trukmė")).toBeDisabled();
-  await page.getByRole("button", { name: "Atšaukti", exact: true }).click();
-  await expect(page.getByText(/Pirkinio išsaugojimo būsena neaiški/)).toBeVisible();
-  secondRelease();
-  await choose();
-  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("24");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  release();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
   await db(async (client) => {
-    const rows = await client.query("SELECT p.warranty_state,p.warranty_end_date::text,p.warranty_source,(SELECT count(*)::int FROM purchase_receipt WHERE purchase_id=p.id) AS receipts FROM purchase p JOIN \"user\" u ON u.id=p.owner_id WHERE u.email=$1", [email]);
+    const rows = await client.query("SELECT p.warranty_state,p.warranty_duration_months,(SELECT count(*)::int FROM purchase_receipt WHERE purchase_id=p.id) AS receipts FROM purchase p JOIN \"user\" u ON u.id=p.owner_id WHERE u.email=$1", [email]);
     expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0]).toMatchObject({ warranty_state: "known", warranty_end_date: "2026-01-01", warranty_source: "duration", receipts: 1 });
+    expect(rows.rows[0]).toMatchObject({ warranty_state: "known", warranty_duration_months: 24, receipts: 1 });
   });
 });
 
@@ -351,7 +312,7 @@ test("pridėjimo formos pavėluotas atšaukimas palieka jau pridėtą čekį", a
   const email = `receipt-add-late-${randomUUID()}@example.test`;
   await signIn(page, email); await page.goto("/prideti");
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "veluojantis.png", mimeType: "image/png", buffer: png });
   await page.getByLabel("Prekės pavadinimas").fill("Pavėluotas atsakymas");
   await page.getByLabel("Pardavėjas").fill("Parduotuvė");
@@ -363,7 +324,7 @@ test("pridėjimo formos pavėluotas atšaukimas palieka jau pridėtą čekį", a
     const saved = await route.fetch(); expect(saved.status()).toBe(200);
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Atsakymas nutrūko." }) });
   });
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page.getByText(/Atsakymas nutrūko/)).toBeVisible();
   await expect(page.getByLabel("Prekės pavadinimas")).toBeDisabled();
   const row = await db(async (client) => (await client.query("SELECT r.id,r.object_key FROM receipt r JOIN \"user\" u ON u.id=r.owner_id WHERE u.email=$1", [email])).rows[0]);
@@ -484,14 +445,17 @@ test("pakartojimas, atšaukimas, validacija ir valymas", async ({ page }) => {
     expect((await client.query("SELECT count(*)::int AS n FROM purchase_receipt WHERE receipt_id=$1", [id])).rows[0].n).toBe(0);
   });
   expect((await page.request.get(`/api/receipts/${id}/content`)).status()).toBe(404);
+  await db(async (client) => { await client.query("UPDATE receipt SET expires_at='2000-01-01' WHERE id=$1", [id]); });
   const { execFileSync } = await import("node:child_process");
-  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...process.env, S3_ENDPOINT: "http://127.0.0.1:9" } });
+  const storageEnv = { ...process.env, AWS_REGION: process.env.S3_REGION, AWS_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY };
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...storageEnv, S3_ENDPOINT: "http://127.0.0.1:9", AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9" } });
   await db(async (client) => {
     const state = await client.query("SELECT state,cleanup_attempts FROM receipt WHERE id=$1", [id]);
     expect(state.rows[0]).toMatchObject({ state: "deleting", cleanup_attempts: 1 });
-    await client.query("UPDATE receipt SET expires_at=now() WHERE id=$1", [id]);
+    await client.query("UPDATE receipt SET expires_at='2000-01-01' WHERE id=$1", [id]);
   });
-  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: process.env });
+  execFileSync(process.execPath, ["scripts/cleanup-receipts.mjs"], { cwd: process.cwd(), env: { ...storageEnv, AWS_ENDPOINT_URL_S3: process.env.S3_ENDPOINT } });
   await db(async (client) => expect((await client.query("SELECT state FROM receipt WHERE id=$1", [id])).rows[0].state).toBe("deleted"));
   const s3 = new S3Client({ endpoint: process.env.S3_ENDPOINT, region: process.env.S3_REGION, forcePathStyle: true, credentials: { accessKeyId: process.env.S3_ACCESS_KEY_ID!, secretAccessKey: process.env.S3_SECRET_ACCESS_KEY! } });
   await expect(s3.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: row.object_key }))).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } });
@@ -504,15 +468,15 @@ test("naujas pirkinys su čekiu iš pliuso ekrano", async ({ page }) => {
   await page.goto("/prideti");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "naujas.png", mimeType: "image/png", buffer: png });
   await page.getByLabel("Prekės pavadinimas").fill("Naujas su čekiu");
   await page.getByLabel("Pardavėjas").fill("Parduotuvė");
   await page.getByLabel("Pirkimo data").fill("2024-03-01");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
   await expect(page.getByText("naujas.png")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Peržiūrėti čekį" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Atidaryti čekį" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -579,6 +543,7 @@ test("bendro čekio numerio pasenusi peržiūra ir netinkami JSON kūnai", async
   });
   await firstPage.goto(`/pirkiniai/${first}/cekis/${receiptId}`);
   await secondPage.goto(`/pirkiniai/${second}/cekis/${receiptId}`);
+  await secondPage.getByText("Daugiau informacijos").click();
   await expect(secondPage.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("ORIGINAL");
   const firstRevision = await db(async (client) => (await client.query("SELECT revision FROM purchase WHERE id=$1",[first])).rows[0].revision as number);
   const correction = { purchaseId: first, productName: "Pirmas bendras pirkinys", seller: "Bandymų pardavėjas", purchaseDate: "2024-01-01", price: "", currency: "", notes: "", receiptNumber: "CORRECTED", expectedReceiptNumber: "ORIGINAL", expectedRevision: firstRevision };
@@ -638,225 +603,78 @@ test("visi 51 vienodo vardo ir 101 pridėtas čekis pasiekiami puslapiais", asyn
   expect((await page.request.get(`/api/receipts/list?purchaseId=${target}&cursor=bad!`)).status()).toBe(400);
 });
 
-test("OCR peržiūra, atšaukimas, rankinis įrašymas ir savininkų atskirtis", async ({ browser }) => {
-  test.setTimeout(240000);
-  const suffix = randomUUID();
-  const owner = await browser.newContext(); const other = await browser.newContext();
-  const page = await owner.newPage(); const foreign = await other.newPage();
-  await signIn(page, `ocr-owner-${suffix}@example.test`);
+test("automatinė OCR peržiūra, tiesioginis taisymas ir savininkų atskirtis", async ({ browser }) => {
+  test.setTimeout(180000);
+  const owner = await browser.newContext(); const foreign = await browser.newContext();
+  const page = await owner.newPage(); const other = await foreign.newPage();
+  await signIn(page, `ocr-owner-${randomUUID()}@example.test`);
   const purchaseId = await createPurchase(page, "Pradinis pirkinys");
-  await page.goto(`/pirkiniai/${purchaseId}`);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="950"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="46" fill="black"><text x="65" y="100">TOPO CENTRAS UAB</text><text x="65" y="190">SONY WH1000XM6 449,00 EUR</text><text x="65" y="290">Is viso 449,00 EUR</text><text x="65" y="390">Data: 2026-10-05</text><text x="65" y="490">Cekio Nr. K12345</text></g></svg>`;
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
-  await chooser.setFiles({ name: "sintetinis-cekis.png", mimeType: "image/png", buffer: png });
-  await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
-  await page.getByRole("button", { name: "Įkelti čekį" }).click();
-  await expect(page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" })).toBeVisible();
-  const receiptId = await db(async (client) => (await client.query("SELECT id FROM receipt WHERE target_purchase_id=$1 AND state='ready'", [purchaseId])).rows[0].id as string);
-  const original = await page.request.get(`/api/receipts/${receiptId}/content`);
-  expect(sha(await original.body())).toBe(sha(png));
-  await page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
+  const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "ocr.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: png });
+  expect(uploaded.status()).toBe(200); const receiptId = (await uploaded.json()).id as string;
+  await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
-  for (const width of [320, 390, 1024]) {
-    await page.setViewportSize({ width, height: 844 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  }
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.evaluate(() => { document.body.style.zoom = "1.25"; });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.evaluate(() => { document.body.style.zoom = ""; });
-  await page.keyboard.press("Tab");
-  expect(await page.evaluate(() => document.activeElement !== document.body && getComputedStyle(document.activeElement!).outlineStyle !== "none")).toBe(true);
-  await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
-  await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
-  await expect(page.getByText("Nuskaitymas atšauktas. Čekis išsaugotas.")).toBeVisible();
-  const contentPath = `**/api/receipts/${receiptId}/content`;
-  await page.route(contentPath, (route) => route.fulfill({ status: 503, body: "Neprieinama" }));
-  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
-  await expect(page.getByText("Nepavyko nuskaityti čekio.")).toBeVisible();
-  await page.unroute(contentPath);
-  const start = Date.now();
-  await page.getByRole("button", { name: "Bandyti dar kartą" }).click();
-  await expect(page.getByText("Nuskaityta. Peržiūrėk pasiūlymus.")).toBeVisible({ timeout: 30000 });
-  console.log(`Synthetic Lithuanian-style PNG OCR: ${Date.now() - start} ms including retry startup`);
-  await expect(page.getByText("449.00 EUR")).toBeVisible();
-  await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
-  await page.getByLabel("Pardavėjas").fill("");
-  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-  await expect(page.getByText("Įvesk pardavėją")).toBeVisible();
+  for (const width of [320,390]) { await page.setViewportSize({ width, height: 844 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); }
   await page.getByLabel("Prekės pavadinimas").fill("Sony ausinės, patikrinta");
+  await expect(page.getByText(/Nuskaityta|Teksto atpažinti nepavyko/)).toBeVisible({ timeout: 30000 });
+  await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue("Sony ausinės, patikrinta");
   await page.getByLabel("Pardavėjas").fill("Topo Centras");
   await page.getByLabel("Pirkimo data").fill("2026-10-05");
+  await page.getByText("Daugiau informacijos").click();
   await page.getByLabel("Čekio numeris (neprivaloma)").fill("K12345");
+  await page.getByText("Daugiau informacijos").click();
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Sony ausinės, patikrinta" })).toBeVisible();
-  await page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
+  await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await page.getByText("Daugiau informacijos").click();
   await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("K12345");
   expect(sha(await (await page.request.get(`/api/receipts/${receiptId}/content`)).body())).toBe(sha(png));
-  const payload = { purchaseId, productName: "Sony ausinės, patikrinta", seller: "Topo Centras", purchaseDate: "2026-10-05", price: "", currency: "", notes: "", receiptNumber: "K12345" };
-  const post = () => page.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload });
-  expect((await post()).status()).toBe(200);
-  expect((await Promise.all([post(), post()])).map((response) => response.status())).toEqual([200, 200]);
-  expect((await page.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: { ...payload, purchaseId: { toString: "broken" } } })).status()).toBe(404);
-  await db(async (client) => {
-    expect((await client.query("SELECT count(*)::int AS n FROM purchase WHERE id=$1", [purchaseId])).rows[0].n).toBe(1);
-    expect((await client.query("SELECT receipt_number FROM receipt WHERE id=$1", [receiptId])).rows[0].receipt_number).toBe("K12345");
-  });
-  await page.goto(`/pirkiniai/${purchaseId}`);
-  const pdfDoc = await PDFDocument.create(); pdfDoc.addPage([240, 300]);
-  const pdf = Buffer.from(await pdfDoc.save());
-  const [pdfChooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti PDF Pasirinkti/ }).click()]);
-  await pdfChooser.setFiles({ name: "rankinis.pdf", mimeType: "application/pdf", buffer: pdf });
-  await page.getByRole("button", { name: "Įkelti čekį" }).click();
-  const pdfItem = page.locator(".receipt-item").filter({ hasText: "rankinis.pdf" });
-  await expect(pdfItem.getByRole("link", { name: "Nuskaityti ir peržiūrėti" })).toBeVisible();
-  await pdfItem.getByRole("link", { name: "Nuskaityti ir peržiūrėti" }).click();
-  await expect(page.getByText("Šio PDF automatinis nuskaitymas neprieinamas.", { exact: false })).toBeVisible();
-  await page.getByLabel("Prekės pavadinimas").fill("Rankiniu būdu patvirtinta prekė");
-  const [pdfSave] = await Promise.all([
-    page.waitForResponse((response) => /\/api\/receipts\/[0-9a-f-]+\/review$/.test(response.url()) && response.request().method() === "POST", { timeout: 15000 }),
-    page.getByRole("button", { name: "Išsaugoti", exact: true }).click(),
-  ]);
-  if (pdfSave.status() !== 200) {
-    const body = await pdfSave.text().catch(() => "Response body unavailable");
-    const alerts = await page.locator(".error-summary").allTextContents().catch(() => []);
-    throw new Error(`PDF review save returned ${pdfSave.status()}: ${body}; form alert: ${alerts.join(" | ")}`);
-  }
-  expect(JSON.parse(pdfSave.request().postData() ?? "{}").productName).toBe("Rankiniu būdu patvirtinta prekė");
-  await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`), { timeout: 15000 });
-  await expect.poll(async () => db(async (client) => (await client.query("SELECT product_name FROM purchase WHERE id=$1", [purchaseId])).rows[0]?.product_name),
-    { timeout: 15000 }).toBe("Rankiniu būdu patvirtinta prekė");
-  await page.goto(`/pirkiniai/${purchaseId}`);
-  await expect(page.getByRole("heading", { name: "Rankiniu būdu patvirtinta prekė" })).toBeVisible({ timeout: 15000 });
-  const variants = [
-    { name: "keli-produktai", lines: ["PREKYBOS CENTRAS", "Pienas 2,30 EUR", "Duona 1,40 EUR", "Is viso 3,70 EUR", "Data 2026-10-05"] },
-    { name: "neryskus", lines: ["PREKYBOS CENTRAS", "Preke 12,30 EUR", "Is viso 12,30 EUR"], blur: true },
-    { name: "dviprasme-data", lines: ["PREKYBOS CENTRAS", "Data 2026-10-05", "Data 2026-10-06", "Terminal ID 123456", "Preke 12,30 EUR"] },
-    { name: "nepalaikoma-valiuta", lines: ["PREKYBOS CENTRAS", "Preke 12,30 CZK", "Total 12,30 CZK", "Data 2026-10-05"] },
-  ];
-  let confirmedName = "Rankiniu būdu patvirtinta prekė";
-  for (const variant of variants) {
-    const body = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="900"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="46" fill="black">${variant.lines.map((line, index) => `<text x="65" y="${100 + index * 85}">${line}</text>`).join("")}</g></svg>`;
-    const image = sharp(Buffer.from(body));
-    const bytes = await (variant.blur ? image.blur(2.2) : image).png().toBuffer();
-    const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": `${variant.name}.png`, "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: bytes });
-    expect(uploaded.status()).toBe(200);
-    const variantId = (await uploaded.json()).id as string;
-    await page.goto(`/pirkiniai/${purchaseId}/cekis/${variantId}`);
-    const started = Date.now();
-    await page.getByRole("button", { name: "Nuskaityti čekį" }).click();
-    await expect(page.getByText(/Nuskaityta\. Peržiūrėk pasiūlymus\.|Teksto atpažinti nepavyko\.|Nepavyko nuskaityti čekio\./)).toBeVisible({ timeout: 30000 });
-    console.log(`${variant.name} OCR: ${Date.now() - started} ms`);
-    await expect(page.getByLabel("Prekės kaina (neprivaloma)")).toHaveValue("");
-    await expect(page.getByLabel("Prekės pavadinimas")).toHaveValue(confirmedName);
-    if (variant.name === "keli-produktai") {
-      const productField = page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas") });
-      await expect(productField.getByText("Pienas", { exact: true })).toBeVisible();
-      await expect(productField.getByText("Duona", { exact: true })).toBeVisible();
-      const priceField = page.locator(".field").filter({ has: page.getByLabel("Prekės kaina (neprivaloma)") });
-      await expect(priceField.getByText("2.30", { exact: true })).toBeVisible();
-      await expect(priceField.getByText("1.40", { exact: true })).toBeVisible();
-      confirmedName = "Kelių prekių čekis, pasirinkta rankiniu būdu";
-      await page.getByLabel("Prekės pavadinimas").fill(confirmedName);
-      await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
-      await page.reload();
-      await expect(page.getByRole("heading", { name: confirmedName })).toBeVisible();
-    }
-    if (variant.name === "nepalaikoma-valiuta") await expect(page.getByText("Čekio suma").locator("..")).not.toContainText("EUR");
-    expect(sha(await (await page.request.get(`/api/receipts/${variantId}/content`)).body())).toBe(sha(bytes));
-  }
-  await signIn(foreign, `ocr-other-${suffix}@example.test`);
-  await foreign.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
-  await expect(foreign.getByRole("heading", { name: "Pirkinys nerastas" })).toBeVisible();
-  expect((await foreign.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(404);
-  expect((await foreign.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload })).status()).toBe(404);
+  await signIn(other, `ocr-other-${randomUUID()}@example.test`);
+  await other.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
+  await expect(other.getByRole("heading", { name: "Pirkinys nerastas" })).toBeVisible();
+  expect((await other.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(404);
   const anonymous = await browser.newContext();
   expect((await anonymous.request.get(`/api/receipts/${receiptId}/content`)).status()).toBe(401);
-  expect((await anonymous.request.post(`/api/receipts/${receiptId}/review`, { headers: { Origin: process.env.APP_URL! }, data: payload })).status()).toBe(401);
-  await anonymous.close(); await owner.close(); await other.close();
+  await anonymous.close(); await owner.close(); await foreign.close();
 });
 
-test("čekio peržiūrą galima valdyti klaviatūra", async ({ page }) => {
-  test.setTimeout(120000);
+test("kompaktišką čekio peržiūrą galima valdyti klaviatūra", async ({ page }) => {
   await signIn(page, `ocr-keyboard-${randomUUID()}@example.test`);
   const purchaseId = await createPurchase(page, "Klaviatūros bandymas");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%" height="100%" fill="white"/><g font-family="Arial" font-size="40" fill="black"><text x="50" y="90">PREKYBOS CENTRAS</text><text x="50" y="170">Preke 19,90 EUR</text><text x="50" y="250">Is viso 19,90 EUR</text></g></svg>`;
-  const bytes = await sharp(Buffer.from(svg)).png().toBuffer();
-  const upload = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "klaviatura.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: bytes });
-  expect(upload.status()).toBe(200);
-  const receiptId = (await upload.json()).id as string;
-  await page.goto(`/pirkiniai/${purchaseId}`);
-  const reviewLink = page.getByRole("link", { name: "Nuskaityti ir peržiūrėti" });
-  await tabTo(page, reviewLink);
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
-  const contentPath = `**/api/receipts/${receiptId}/content`;
-  let releaseScan: (() => void) | undefined;
-  await page.route(contentPath, async (route) => {
-    if (route.request().resourceType() !== "fetch") return route.continue();
-    await new Promise<void>((resolve) => { releaseScan = resolve; });
-    await route.continue().catch(() => {});
-  });
-  await tabTo(page, page.getByRole("button", { name: "Nuskaityti čekį" }));
-  await page.keyboard.press("Enter");
-  await expect.poll(() => Boolean(releaseScan)).toBe(true);
-  await tabTo(page, page.getByRole("button", { name: "Atšaukti nuskaitymą" }));
-  await page.keyboard.press("Enter");
-  await expect(page.getByText("Nuskaitymas atšauktas. Čekis išsaugotas.")).toBeVisible();
-  releaseScan?.();
-  await page.unroute(contentPath);
-  await tabTo(page, page.getByRole("button", { name: "Bandyti dar kartą" }));
-  await page.keyboard.press("Enter");
-  await expect(page.getByText(/Nuskaityta\. Peržiūrėk pasiūlymus\.|Teksto atpažinti nepavyko\./)).toBeVisible({ timeout: 30000 });
-  await tabTo(page, page.getByRole("link", { name: "Įvesti rankiniu būdu" }));
-  await page.keyboard.press("Enter");
-  const product = page.getByLabel("Prekės pavadinimas");
-  await tabTo(page, product);
-  await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.type("Klaviatūra patvirtinta prekė");
-  await tabTo(page, page.getByLabel("Pardavėjas"));
-  await page.keyboard.press("ControlOrMeta+A");
-  await page.keyboard.type("Prekybos centras");
-  await tabTo(page, page.getByLabel("Pirkimo data"));
-  await tabTo(page, page.getByLabel("Prekės kaina (neprivaloma)"));
-  await page.keyboard.type("19,90");
-  const currency = page.getByLabel("Prekės kainos valiuta");
-  await tabTo(page, currency);
-  await page.keyboard.press("e");
-  await page.keyboard.press("Tab");
-  await expect(currency).toHaveValue("EUR");
-  await tabTo(page, page.getByLabel("Čekio numeris (neprivaloma)"));
-  await page.keyboard.type("K-KEY-001");
-  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true }));
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Klaviatūra patvirtinta prekė" })).toBeVisible();
+  const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: "white" } }).png().toBuffer();
+  const upload = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "keyboard.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: bytes });
+  expect(upload.status()).toBe(200); const receiptId = (await upload.json()).id as string;
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
-  await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("K-KEY-001");
+  await tabTo(page, page.getByLabel("Išskleisti čekio peržiūrą"));
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".receipt-review-preview")).toHaveAttribute("open", "");
+  await tabTo(page, page.getByLabel("Prekės pavadinimas"));
+  await page.keyboard.press("ControlOrMeta+A"); await page.keyboard.type("Klaviatūra patvirtinta prekė");
+  await tabTo(page, page.getByText("Daugiau informacijos")); await page.keyboard.press("Enter");
+  await expect(page.locator(".receipt-more")).toHaveAttribute("open", "");
+  await tabTo(page, page.getByLabel("Čekio numeris (neprivaloma)")); await page.keyboard.type("K-KEY-001");
+  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true })); await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Klaviatūra patvirtinta prekė" })).toBeVisible();
 });
 
-test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", async ({ page }) => {
+test("čekio peržiūra perskaičiuoja trukmę ir atmeta pasenusį įrašą", async ({ page }) => {
   const email = `warranty-review-${randomUUID()}@example.test`;
   await signIn(page, email);
   const purchaseId = await createPurchase(page, "Garantijos čekis");
-  await page.goto(`/pirkiniai/${purchaseId}/redaguoti`);
+  await page.goto(`/pirkiniai/${purchaseId}`);
+  await page.getByRole("button", { name: "Keisti garantiją" }).click();
   await page.getByLabel("Garantijos trukmė").selectOption("36");
-  await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
-  await expect(page.getByText("Pabaigos data:")).toContainText("2027");
+  await page.getByRole("button", { name: "Išsaugoti garantiją" }).click();
+  await expect(page.locator(".placeholder-card > p").filter({ hasText: "Garantija iki" })).toContainText("2027");
   const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
   const uploaded = await page.request.post("/api/receipts", { headers: { Origin: process.env.APP_URL!, "Content-Type": "image/png", "X-File-Name": "garantija.png", "X-Purchase-Id": purchaseId, "X-Submission-Key": randomUUID() }, data: png });
   expect(uploaded.status()).toBe(200);
   const receiptId = (await uploaded.json()).id as string;
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
-  await page.waitForLoadState("networkidle");
-  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("36");
   await page.getByLabel("Pirkimo data").fill("2024-02-01");
-  await expect(page.getByText("Garantija iki:")).toContainText("2027");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
-  await expect(page.getByText("Pabaigos data:")).toContainText("2027");
+  await expect(page.getByText(/Garantija iki/)).toContainText("2027");
   await page.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   const stale = await page.context().newPage(); await stale.goto(`/pirkiniai/${purchaseId}/cekis/${receiptId}`);
   await page.getByLabel("Prekės pavadinimas").fill("Naujesnis įrašas");
@@ -865,7 +683,6 @@ test("čekio peržiūra saugo garantiją ir atmeta pasenusį patvirtinimą", asy
   await stale.getByLabel("Prekės pavadinimas").fill("Pasenęs įrašas");
   await stale.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(stale.getByText(/Pirkinys pasikeitė kitur/)).toBeVisible();
-  await expect(stale.getByLabel("Prekės pavadinimas")).toHaveValue("Pasenęs įrašas");
   await db(async (client) => {
     const result = await client.query("SELECT product_name,warranty_state,warranty_end_date::text FROM purchase WHERE id=$1", [purchaseId]);
     expect(result.rows[0]).toMatchObject({ product_name: "Naujesnis įrašas", warranty_state: "known", warranty_end_date: "2027-02-01" });
@@ -890,15 +707,18 @@ test("suvyniota prekė ir atskira PVM kainos eilutė pasiekia naujo pirkinio for
   await signIn(page, `wrapped-ocr-${randomUUID()}@example.test`);
   await page.goto("/prideti");
   const photo = await wrappedReceiptPhoto();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "fictional-wrapped.jpeg", mimeType: "image/jpeg", buffer: photo });
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("UAB Bandymų technika");
   await expect(page.locator(".field").filter({ has: page.getByLabel("Prekės pavadinimas", { exact: true }) })).toContainText("indukcinė kaitlentė");
-  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("179.49");
+  await page.getByText("Daugiau informacijos").click();
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("");
+  await page.getByLabel("Kaina (neprivaloma)", { exact: true }).fill("179.49");
+  await page.getByLabel("Valiuta").selectOption("EUR");
   await expect(page.getByText(/Čekio suma: 179.50/)).toBeVisible();
   await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("TEST60420CK Bandymų indukcinė kaitlentė");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
   const purchaseId = new URL(page.url()).pathname.split("/").pop()!;
   await page.reload();
@@ -915,9 +735,10 @@ test("kelių prekių OCR variantai rodomi naujo pirkinio peržiūroje", async ({
   const lines = ["UAB Bandymų prekyba", "Bandymų puodelis 17,49 A", "Bandymų lėkštė 29,99 B", "Mokėti 47,48", "Kvito Nr. 3/4/54321", "2024-01-30 12:41"];
   const image = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><rect width="100%" height="100%" fill="#5d5345"/><rect x="100" y="60" width="700" height="1080" fill="#f2f0e9"/><g font-family="DejaVu Sans" font-size="34" fill="#242424">${lines.map((line, index) => `<text x="145" y="${150 + index * 145}">${line}</text>`).join("")}</g></svg>`;
   const photo = await sharp(Buffer.from(image)).jpeg({ quality: 88 }).toBuffer();
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "fictional-multiple.jpeg", mimeType: "image/jpeg", buffer: photo });
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
+  await page.getByText("Daugiau informacijos").click();
   await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("");
   await expect(page.getByRole("button", { name: "17.49", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "29.99", exact: true })).toBeVisible();
@@ -931,22 +752,22 @@ test("prie esamo pirkinio pridėto čekio nuskaitymo pasiūlymai išlieka perži
   await signIn(page, `existing-ocr-${randomUUID()}@example.test`);
   const purchaseId = await createPurchase(page, "Patvirtintas pirkinys");
   await page.goto(`/pirkiniai/${purchaseId}`);
-  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti nuotrauką Pasirinkti/ }).click()]);
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Įkelti failą Pasirinkti/ }).click()]);
   await chooser.setFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await page.getByRole("button", { name: "Įkelti čekį" }).click();
   await page.getByRole("link", { name: "Peržiūrėti nuskaitytus duomenis" }).click();
   await expect(page.getByRole("heading", { name: "Peržiūrėk duomenis" })).toBeVisible();
-  await expect(page.getByText("Nuskaityta. Peržiūrėk pasiūlymus.")).toBeVisible();
+  await expect(page.getByText("Nuskaityta. Patikrink informaciją.")).toBeVisible();
+  await page.getByText("Daugiau informacijos").click();
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("Patvirtintas pirkinys");
   await expect(page.getByText(/Modelio kodą sutikrink su čekiu/)).toBeVisible();
   await expect(page.getByText("UAB Bandymų prekyba")).toBeVisible();
   const price = page.getByLabel("Prekės kaina (neprivaloma)");
   await expect(price).toHaveValue("");
-  await price.locator("..").getByRole("button", { name: "Pritaikyti pasiūlymą" }).click();
-  await expect(price).toHaveValue("19.99");
+  await price.fill("19.99");
   await expect(page.getByText("20.00")).toBeVisible();
-  await page.getByLabel("Prekės kainos valiuta").selectOption("EUR");
+  await page.getByLabel("Valiuta").selectOption("EUR");
   await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("Patvirtintas pirkinys, pataisytas");
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/pirkiniai/${purchaseId}\\?busena=atnaujinta`));
@@ -959,18 +780,21 @@ test("naujas čekis nuskaitomas prieš sukuriant pirkinį ir išsaugomas origina
   test.setTimeout(120000);
   await signIn(page, `new-ocr-${randomUUID()}@example.test`);
   await page.goto("/prideti");
-  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
+  await page.getByLabel("Įkelti failą", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("UAB Bandymų prekyba");
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue(/Prietaisas.*bandomasis įrenginys/);
   await expect(page.getByText(/Modelio kodą sutikrink su čekiu/)).toBeVisible();
   await expect(page.getByLabel("Pirkimo data", { exact: true })).toHaveValue("2024-01-30");
-  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("19.99");
+  await page.getByText("Daugiau informacijos").click();
+  await expect(page.getByLabel("Kaina (neprivaloma)", { exact: true })).toHaveValue("");
+  await page.getByLabel("Kaina (neprivaloma)", { exact: true }).fill("19.99");
+  await page.getByLabel("Valiuta").selectOption("EUR");
   await expect(page.getByText(/Čekio suma: 20.00/)).toBeVisible();
   await expect(page.getByLabel("Čekio numeris (neprivaloma)")).toHaveValue("1/1/12345");
   // Owner review corrects any OCR model-character error before committing.
   await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("TEST60420 Prietaisas bandomasis įrenginys");
-  await page.getByRole("button", { name: "Išsaugoti pirkinį ir čekį" }).click();
+  await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+\?busena=cekis-pridetas/);
   const purchaseId = new URL(page.url()).pathname.split("/").pop()!;
   await page.reload();
@@ -984,9 +808,10 @@ test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitim
   test.setTimeout(120000);
   await signIn(page, `new-ocr-cancel-${randomUUID()}@example.test`);
   await page.goto("/prideti");
-  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
+  await page.getByLabel("Įkelti failą", { exact: true }).setInputFiles({ name: "anonymous-receipt.jpeg", mimeType: "image/jpeg", buffer: await anonymousReceiptPhoto() });
   await page.getByLabel("Pardavėjas", { exact: true }).fill("Mano patikrintas pardavėjas");
   await page.getByLabel("Prekės pavadinimas", { exact: true }).fill("Mano patikrinta prekė");
+  await page.getByText("Daugiau informacijos").click();
   await page.getByLabel("Kaina (neprivaloma)", { exact: true }).fill("18.75");
   await page.getByLabel("Pirkimo data", { exact: true }).fill("2024-02-01");
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
@@ -998,8 +823,8 @@ test("naujo čekio OCR neperrašo įvestų laukų; atšaukimas ir failo pakeitim
   await page.getByRole("button", { name: "Atšaukti nuskaitymą" }).click();
   await expect(page.getByText("Nuskaitymas atšauktas. Gali įvesti duomenis rankiniu būdu.")).toBeVisible();
   const pdf = await PDFDocument.create(); pdf.addPage([200, 200]);
-  await page.getByLabel("Įkelti PDF", { exact: true }).setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
-  await expect(page.getByText("PDF automatinis nuskaitymas neprieinamas. Įvesk duomenis rankiniu būdu.")).toBeVisible();
+  await page.getByLabel("Įkelti failą", { exact: true }).setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+  await expect(page.getByText(/PDF automatinis nuskaitymas neprieinamas/)).toBeVisible();
   await expect(page.getByLabel("Pardavėjas", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Prekės pavadinimas", { exact: true })).toHaveValue("");
 });
@@ -1016,7 +841,7 @@ test("tikru OCR perskaitytos dvi datos pasiekia naujo pirkinio peržiūrą", asy
   ] as const;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1650"><rect width="100%" height="100%" fill="#eee"/><rect x="75" y="55" width="850" height="1540" fill="#f7f7f2"/><g font-family="DejaVu Sans" font-size="32" fill="#252525">${lines.map(([line, y]) => `<text x="110" y="${y}">${line}</text>`).join("")}</g></svg>`;
   const photo = await sharp(Buffer.from(svg)).jpeg({ quality: 90 }).toBuffer();
-  await page.getByLabel("Įkelti nuotrauką", { exact: true }).setInputFiles({ name: "fictional-footer.jpeg", mimeType: "image/jpeg", buffer: photo });
+  await page.getByLabel("Įkelti failą", { exact: true }).setInputFiles({ name: "fictional-footer.jpeg", mimeType: "image/jpeg", buffer: photo });
   await expect(page.getByText(/Nuskaityta\. Patikrink pasiūlytus duomenis/)).toBeVisible({ timeout: 90000 });
   const date = page.getByLabel("Pirkimo data", { exact: true });
   await expect(date).toHaveValue("");

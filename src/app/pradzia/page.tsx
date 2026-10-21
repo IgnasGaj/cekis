@@ -35,7 +35,7 @@ export default async function HomePage() {
         <h2 id="upcoming-title">Artimiausios garantijų pabaigos</h2>
         <p className="home-section-note">Iki penkių pirkinių per artimiausias 90 dienų.</p>
         {upcomingRows.length ? <div className="purchase-list">{upcomingRows.map((row) => <Link className="purchase-card" href={`/pirkiniai/${row.id}`} key={row.id}>
-          <strong>{row.productName}</strong><span>{row.seller}</span>
+          <strong>{row.productName || "Čekis be pavadinimo"}</strong><span>{row.seller || "Pardavėjas nenurodytas"}</span>
           <span>Garantija iki {displayDate(row.warrantyEndDate!)}</span>
           <span className="warranty-card-status">{dayPhrase(remainingDays(row.warrantyEndDate!, today))}</span>
         </Link>)}</div> : <p className="home-no-upcoming">Per artimiausias 90 dienų garantijos nesibaigia.</p>}
@@ -44,7 +44,7 @@ export default async function HomePage() {
         <h2 id="recent-title">Naujausi pirkiniai</h2>
         <p className="home-section-note">Pagal įrašymo datą.</p>
         <div className="purchase-list">{recentRows.map((row) => <Link className="purchase-card" href={`/pirkiniai/${row.id}`} key={row.id}>
-          <strong>{row.productName}</strong><span>{row.seller}</span><span>Pirkta {displayDate(row.purchaseDate)}</span>
+          <strong>{row.productName || "Čekis be pavadinimo"}</strong><span>{row.seller || "Pardavėjas nenurodytas"}</span><span>{row.purchaseDate ? `Pirkta ${displayDate(row.purchaseDate)}` : "Pirkimo data nenurodyta"}</span>
           <span className="warranty-card-status">{warrantyStatus({ warrantyState: row.warrantyState as WarrantyState, warrantyEndDate: row.warrantyEndDate }, today).label}</span>
         </Link>)}</div>
         <Link className="text-link" href="/pirkiniai">Visi pirkiniai</Link>

@@ -72,7 +72,7 @@ test("rankinis ciklas, paieška, paskyrų izoliacija ir ištrynimas", async ({ b
   const id = new URL(page.url()).pathname.split("/").pop()!;
   await expect(page.getByRole("heading", { name: "Žalias čėkis" })).toBeVisible();
   await expect(page.getByText("12,50 PLN")).toBeVisible();
-  await expect(page.getByText("Pabaigos data:")).toContainText("2026-02-28");
+  await expect(page.getByText(/Garantija iki/)).toContainText("2026-02-28");
   await expect(page.getByText("Čekis nepridėtas")).toBeVisible();
   await expect(page.locator("b")).toHaveCount(0);
   await page.reload();
@@ -233,7 +233,7 @@ test("vienas kūrimo raktas nesukuria dublikatų ir neatkuria ištrinto įrašo"
   await context.close();
 });
 
-test("prarasto atsakymo pakartojimas lygina visus pirkinio ir garantijos duomenis", async ({ browser }) => {
+test("prarasto atsakymo pakartojimas išlaiko automatinę garantiją ir pirkinio duomenis", async ({ browser }) => {
   const email = `retry-warranty-${Date.now()}@example.test`;
   const context = await browser.newContext();
   const savedPage = await context.newPage();
@@ -243,7 +243,7 @@ test("prarasto atsakymo pakartojimas lygina visus pirkinio ir garantijos duomeni
     await page.getByLabel("Prekės pavadinimas").fill("Garantijos bandymas");
     await page.getByLabel("Pardavėjas").fill("Pardavėjas");
     await page.getByLabel("Pirkimo data").fill("2024-01-01");
-    await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("24");
+    await expect(page.getByLabel("Garantijos trukmė")).toHaveCount(0);
   };
   await fill(savedPage);
   const key = await savedPage.locator('input[name="submissionKey"]').inputValue();
@@ -279,12 +279,6 @@ test("prarasto atsakymo pakartojimas lygina visus pirkinio ir garantijos duomeni
     await expect(retained.getByText(/Pirkinys jau išsaugotas su kitais duomenimis/)).toBeVisible();
     await expect(retained.getByRole("link", { name: "Peržiūrėti išsaugotą pirkinį" })).toHaveAttribute("href", `/pirkiniai/${id}`);
   };
-  await retry(async (page) => { await page.getByLabel("Garantijos trukmė").selectOption("36"); });
-  await expect(retained.getByLabel("Garantijos trukmė")).toHaveValue("36");
-  await retry(async (page) => { await page.getByLabel("Garantijos būsena").selectOption("none"); });
-  await expect(retained.getByLabel("Garantijos būsena")).toHaveValue("none");
-  await retry(async (page) => { await page.getByLabel("Garantijos trukmė").selectOption("12"); });
-  await expect(retained.getByLabel("Garantijos trukmė")).toHaveValue("12");
   await retry(async (page) => { await page.getByLabel("Prekės pavadinimas").fill("Pakeistas pavadinimas"); });
   await expect(retained.getByLabel("Prekės pavadinimas")).toHaveValue("Pakeistas pavadinimas");
   await withAppDb(async (client) => {
@@ -419,20 +413,23 @@ test("garantijos būsena, patvirtinimas, konfliktas ir filtravimas prieš puslap
   await page.getByLabel("Prekės pavadinimas").fill("Ilga garantijos prekė");
   await page.getByLabel("Pardavėjas").fill("Pardavėjas");
   await page.getByLabel("Pirkimo data").fill("2024-01-31");
-  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("24");
-  await page.getByLabel("Garantijos trukmė").selectOption("36");
-  await expect(page.getByText("Garantija iki:")).toContainText("2027");
+  await expect(page.getByLabel("Garantijos trukmė")).toHaveCount(0);
   await page.getByRole("button", { name: "Išsaugoti", exact: true }).click();
   await expect(page).toHaveURL(/\/pirkiniai\/[0-9a-f-]+/);
   const id = new URL(page.url()).pathname.split("/").pop()!;
-  await expect(page.getByText("Pabaigos data:")).toContainText("2027");
+  await page.getByRole("button", { name: "Keisti garantiją" }).click();
+  await page.getByLabel("Garantijos trukmė").selectOption("36");
+  await expect(page.getByText("Garantija iki:")).toContainText("2027");
+  await page.getByRole("button", { name: "Išsaugoti garantiją" }).click();
+  await expect(page).toHaveURL(new RegExp(`/pirkiniai/${id}\\?busena=atnaujinta`));
+  await expect(page.getByRole("region", { name: "Garantijos informacija" })).toContainText("2027");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1024, height: 768 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const row = await withAppDb(async (client) => (await client.query("SELECT warranty_state,warranty_end_date::text,warranty_duration_months,warranty_source,revision FROM purchase WHERE id=$1", [id])).rows[0]);
-  expect(row).toMatchObject({ warranty_state: "known", warranty_end_date: "2027-01-31", warranty_duration_months: 36, warranty_source: "duration", revision: 1 });
+  expect(row).toMatchObject({ warranty_state: "known", warranty_end_date: "2027-01-31", warranty_duration_months: 36, warranty_source: "duration", revision: 2 });
   await page.goto(`/pirkiniai/${id}/redaguoti`);
   await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("36");
   const stale = await owner.newPage(); await stale.goto(`/pirkiniai/${id}/redaguoti`);
@@ -497,13 +494,19 @@ test("garantiją ir jos filtrą galima valdyti klaviatūra", async ({ page }) =>
   await page.getByLabel("Prekės pavadinimas").fill("Klaviatūros garantija");
   await page.getByLabel("Pardavėjas").fill("Pardavėjas");
   await page.getByLabel("Pirkimo data").fill("2024-01-31");
+  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Klaviatūros garantija" })).toBeVisible();
+  await tabTo(page, page.getByRole("button", { name: "Keisti garantiją" }));
+  await page.keyboard.press("Enter");
   const months = page.getByLabel("Garantijos trukmė");
   await tabTo(page, months);
   await months.selectOption("36");
   await expect(months).toHaveValue("36");
-  await tabTo(page, page.getByRole("button", { name: "Išsaugoti", exact: true }));
+  await tabTo(page, page.getByRole("button", { name: "Išsaugoti garantiją" }));
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Klaviatūros garantija" })).toBeVisible();
+  await expect(page).toHaveURL(/busena=atnaujinta/);
+  await expect(page.getByRole("region", { name: "Garantijos informacija" })).toContainText("2027");
   await page.goto("/pirkiniai");
   const filter = page.getByLabel("Garantijos filtras");
   await expect(filter).toBeVisible();
@@ -551,7 +554,7 @@ test("senos datos išlaikomos, o keitimas į trukmę yra aiškus", async ({ page
   });
   await withAppDb(async (client) => client.query("UPDATE purchase SET warranty_duration_months=48,warranty_end_date='2028-02-29' WHERE id=$1", [id]));
   await page.goto(`/pirkiniai/${id}/redaguoti`);
-  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("48");
+  await expect(page.getByLabel("Garantijos trukmė")).toHaveValue("custom");
   await page.getByLabel("Pirkimo data").fill("2024-01-31");
   await expect(page.getByText("Garantija iki:")).toContainText("2028-01-31");
   await page.getByRole("button", { name: "Išsaugoti pakeitimus" }).click();
@@ -567,7 +570,7 @@ test("serveris atmeta nepalaikomą trukmę ir neklauso pateiktos pabaigos datos"
   const fields = { productName: "Serverio garantija", seller: "Pardavėjas", purchaseDate: "2024-02-29", price: "", currency: "EUR", notes: "" };
   const warranty = { warrantyState: "known", warrantySource: "duration", warrantyDurationMonths: "12", warrantyEndDate: "9999-12-31", warrantyConfirmed: false };
   const post = (key: string, value: typeof warranty) => page.request.post("/api/purchases", { headers: { Origin: process.env.APP_URL! }, data: { key, fields, warranty: value } });
-  expect((await post(randomUUID(), { ...warranty, warrantyDurationMonths: "48" })).status()).toBe(400);
+  expect((await post(randomUUID(), { ...warranty, warrantyDurationMonths: "601" })).status()).toBe(400);
   expect((await post(randomUUID(), { ...warranty, warrantySource: "date", warrantyDurationMonths: "" })).status()).toBe(400);
   const created = await post(randomUUID(), warranty);
   expect(created.status()).toBe(200);

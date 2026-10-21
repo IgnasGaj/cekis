@@ -1,4 +1,5 @@
-export function displayDate(iso: string) {
+export function displayDate(iso: string | null) {
+  if (!iso) return "Nenurodyta";
   return new Intl.DateTimeFormat("lt-LT", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`));
 }
 

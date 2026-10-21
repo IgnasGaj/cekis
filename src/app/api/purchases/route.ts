@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     !["productName","seller","purchaseDate","price","currency","notes"].every((key) => typeof body.fields[key] === "string")) {
     return Response.json({ error: "Patikrink pirkinio laukus ir bandyk dar kartą." }, { status: 400 });
   }
-  const parsed = parsePurchaseFields(body.fields);
+  const parsed = parsePurchaseFields(body.fields, undefined, body.receiptUpload === true);
   if (!parsed.value) return Response.json({ errors: parsed.errors }, { status: 400 });
   const warrantyKeys = ["warrantyState", "warrantyEndDate", "warrantyDurationMonths", "warrantySource"] as const;
   const warrantySupplied = body.warranty !== undefined;
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     if (!id) return Response.json({ error: "Šis įrašas jau ištrintas." }, { status: 409 });
     const saved = await getPurchase(id);
     if (!saved) return Response.json({ error: "Pirkinys nerastas." }, { status: 404 });
-    const fields = { productName: saved.productName, seller: saved.seller, purchaseDate: saved.purchaseDate,
+    const fields = { productName: saved.productName, seller: saved.seller, purchaseDate: saved.purchaseDate ?? "",
       price: saved.price ?? "", currency: saved.currency ?? "EUR", notes: saved.notes ?? "" };
     const matchesSubmitted = purchaseMatchesSubmitted(saved, parsed.value, warranty?.value ?? undefined);
     if (matchesSubmitted) { revalidatePath("/pradzia"); revalidatePath("/pirkiniai"); }

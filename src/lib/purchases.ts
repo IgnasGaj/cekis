@@ -6,7 +6,7 @@ import { purchase } from "./schema";
 import { requireSession } from "./session";
 import type { parsePurchaseFields } from "./purchase-validation";
 import { todayInVilnius } from "./purchase-validation";
-import { defaultWarranty, type WarrantyInput } from "./warranty";
+import { addMonthsClamped, defaultWarranty, type WarrantyInput } from "./warranty";
 import { reconcilePurchase } from "./reminders";
 
 type Values = NonNullable<ReturnType<typeof parsePurchaseFields>["value"]>;
@@ -114,6 +114,7 @@ export function purchaseMatchesSubmitted(saved: NonNullable<Awaited<ReturnType<t
 }
 
 export async function createPurchase(key: string, values: Values, warranty?: WarrantyInput) {
+  const manualWarranty = warranty !== undefined;
   warranty ??= defaultWarranty(values.purchaseDate);
   const { user } = await requireSession();
   if (!isPurchaseId(key)) return null;
@@ -121,10 +122,10 @@ export async function createPurchase(key: string, values: Values, warranty?: War
   try {
     await client.query("BEGIN");
     const inserted = await client.query<{ id: string }>(`INSERT INTO purchase(owner_id,submission_key,product_name,seller,purchase_date,price,currency,notes,
-      warranty_state,warranty_end_date,warranty_duration_months,warranty_source)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(owner_id,submission_key) DO NOTHING RETURNING id`,
+      warranty_state,warranty_end_date,warranty_duration_months,warranty_source,warranty_origin)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(owner_id,submission_key) DO NOTHING RETURNING id`,
       [user.id,key,values.productName,values.seller,values.purchaseDate,values.price,values.currency,values.notes,
-        warranty.warrantyState,warranty.warrantyEndDate,warranty.warrantyDurationMonths,warranty.warrantySource]);
+        warranty.warrantyState,warranty.warrantyEndDate,warranty.warrantyDurationMonths,warranty.warrantySource,manualWarranty ? "manual" : "automatic"]);
     if (inserted.rows[0]) await reconcilePurchase(client,user.id,inserted.rows[0].id);
     const existing = inserted.rows[0] ?? (await client.query<{ id: string; deleted_at: Date | null }>(
       "SELECT id,deleted_at FROM purchase WHERE owner_id=$1 AND submission_key=$2",[user.id,key])).rows[0];
@@ -135,25 +136,36 @@ export async function createPurchase(key: string, values: Values, warranty?: War
 }
 
 export async function updatePurchase(id: string, values: Values, expectedRevision: number, warranty?: WarrantyInput): Promise<"updated" | "missing" | "conflict" | "review"> {
+  const manualWarranty = warranty !== undefined;
   const { user } = await requireSession();
   if (!isPurchaseId(id)) return "missing";
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const current = (await client.query<{ revision: number; warranty_state: string; warranty_source: string | null; warranty_duration_months: number | null; purchase_date: string | null }>(
+      "SELECT revision,warranty_state,warranty_source,warranty_duration_months,purchase_date::text FROM purchase WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL FOR UPDATE",[id,user.id])).rows[0];
+    if (!current) { await client.query("ROLLBACK"); return "missing"; }
+    if (current.revision !== expectedRevision) { await client.query("ROLLBACK"); return "conflict"; }
+    if (!warranty && current.warranty_source === "duration" && current.warranty_duration_months && current.purchase_date !== values.purchaseDate) {
+      warranty = { warrantyState: "known", warrantySource: "duration", warrantyDurationMonths: current.warranty_duration_months,
+        warrantyEndDate: values.purchaseDate ? addMonthsClamped(values.purchaseDate, current.warranty_duration_months) : null };
+    }
+    if (!warranty && current.warranty_source === "date" && values.purchaseDate && current.purchase_date !== values.purchaseDate) {
+      const fixed = (await client.query<{ warranty_end_date: string }>("SELECT warranty_end_date::text FROM purchase WHERE id=$1",[id])).rows[0]?.warranty_end_date;
+      if (fixed && values.purchaseDate > fixed) { await client.query("ROLLBACK"); return "review"; }
+    }
     const rows = await client.query(`UPDATE purchase SET product_name=$3,seller=$4,purchase_date=$5,price=$6,currency=$7,notes=$8,
       warranty_state=coalesce($9,warranty_state),warranty_end_date=case when $9::text is null then warranty_end_date else $10::date end,
       warranty_duration_months=case when $9::text is null then warranty_duration_months else $11::integer end,
-      warranty_source=case when $9::text is null then warranty_source else $12::text end,revision=revision+1,updated_at=now()
+      warranty_source=case when $9::text is null then warranty_source else $12::text end,
+      warranty_origin=case when $14::boolean then 'manual' else warranty_origin end,revision=revision+1,updated_at=now()
       WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL AND revision=$13
-      AND ($9::text IS NOT NULL OR warranty_state <> 'known' OR purchase_date=$5::date) RETURNING id`,
+      RETURNING id`,
       [id,user.id,values.productName,values.seller,values.purchaseDate,values.price,values.currency,values.notes,
-        warranty?.warrantyState ?? null,warranty?.warrantyEndDate ?? null,warranty?.warrantyDurationMonths ?? null,warranty?.warrantySource ?? null,expectedRevision]);
+        warranty?.warrantyState ?? null,warranty?.warrantyEndDate ?? null,warranty?.warrantyDurationMonths ?? null,warranty?.warrantySource ?? null,expectedRevision,manualWarranty]);
     if (rows.rowCount) { await reconcilePurchase(client,user.id,id); await client.query("COMMIT"); return "updated"; }
-    const current = (await client.query<{revision:number; warranty_state:string; purchase_date:string}>(
-      "SELECT revision,warranty_state,purchase_date::text FROM purchase WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL",[id,user.id])).rows[0];
     await client.query("ROLLBACK");
-    if (!current) return "missing";
-    return current.revision !== expectedRevision ? "conflict" : "review";
+    return "conflict";
   } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
   finally { client.release(); }
 }
